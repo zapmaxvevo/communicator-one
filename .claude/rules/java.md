@@ -71,7 +71,29 @@ y local sobre un enum propio del módulo está bien; lo que se evita es repartir
 ## Persistencia y transacciones
 - `@Transactional` en el caso de uso (servicio de aplicación), no en controllers ni repositorios. Las lecturas, con
   `readOnly = true`.
-- Toda consulta de negocio filtra por `organizationId`.
+- Multi-tenant (P-018): toda entidad de negocio lleva `@TenantId @Column(name = "organization_id") private UUID
+  organizationId;`, sin setter. Hibernate lo asigna al persistir con la organización activa y filtra por él las
+  consultas JPQL, Criteria, derivadas de Spring Data y `findById`. No se agrega `organizationId` a mano a esas
+  consultas. Los `UPDATE`/`DELETE` masivos por JPQL no están verificados: no confiar en el filtro ahí sin un test de
+  otra organización. `TenantIsolationTest` falla si una entidad de `com.communicatorone` (salvo `Organization`) no lo
+  tiene.
+- La organización activa la da `CurrentOrganization` (módulo `organizations`): el ámbito explícito de `runAs`/`callAs`
+  o, si no hay, el principal autenticado que implementa `OrganizationMember`. Sin ninguno de los dos, las lecturas
+  vuelven vacías y las escrituras fallan.
+- SQL nativo y `JdbcTemplate` **no** pasan por `@TenantId`: filtran por `organization_id` a mano, siempre.
+- Procesos sin usuario (webhooks, jobs, listeners) llaman a `currentOrganization.runAs(organizationId, ...)` **fuera**
+  de la transacción, con el `@Transactional` adentro: la organización se fija al abrir la sesión, y `runAs` dentro de
+  una transacción o de un ámbito transaccional (incluido `SUPPORTS`) lanza `IllegalStateException`.
+- Los cambios de hilo (`@Async`, executors, `CompletableFuture`) no heredan el ámbito de `runAs` ni el
+  `SecurityContext`: el código que corre en el otro hilo vuelve a abrir su `runAs`.
+- Los eventos de dominio llevan `organizationId`. Los listeners de eventos que tocan datos de una organización no
+  llevan transacción propia: hacen `runAs(event.organizationId(), ...)` y llaman a un servicio `@Transactional`; no
+  usar `@ApplicationModuleListener` directo para eso. Tampoco un `@TransactionalEventListener(phase = AFTER_COMMIT)`
+  síncrono: corre con la sincronización de la transacción todavía activa y `runAs` lanza `IllegalStateException`. El
+  listener es `@Async` + `@TransactionalEventListener`, sin `@Transactional`; hace falta `@EnableAsync`, que la app
+  todavía no tiene.
+- El aislamiento supone `spring.jpa.open-in-view: false` (`application.yml`). Con OSIV activo, el `EntityManager` se
+  abre al empezar el request con la organización del usuario, y un `runAs` dentro del request la usaría en silencio.
 - Webhooks idempotentes: restricción única en la base (`externalId` + `ChannelAccount`) y el duplicado se trata como
   éxito.
 - `spring.jpa.hibernate.ddl-auto=validate`. El esquema solo cambia con Flyway.

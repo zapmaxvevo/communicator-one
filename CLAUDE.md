@@ -72,7 +72,16 @@ Son públicos `/error` y `/actuator/health` y todas sus subrutas (entre ellas li
 todo lo demás (resto de actuator, Swagger, `/v3/api-docs`, `/api/**`) responde 401 hasta el issue #5 (JWT), ver P-006.
 Los tests de integración importan `TestcontainersConfiguration` (`@Import`), que levanta con Docker su propio
 PostgreSQL (no usa el de compose), compartido por toda la corrida con `@ServiceConnection`. Las migraciones Flyway van
-en `src/main/resources/db/migration` (ubicación por defecto; todavía no hay ninguna).
+en `src/main/resources/db/migration` (ubicación por defecto; la primera es `V1__create_organizations.sql`). En los
+tests, Flyway también toma `src/test/resources/db/migration` del classpath, con la migración repetible de la tabla de
+`IsolationProbe`, la entidad solo de test que prueba el aislamiento (P-020): no cambiar `spring.flyway.locations` en
+los tests, porque la entidad está en todos los contextos y `ddl-auto=validate` exige su tabla. Por esa migración de
+test, todo `@SpringBootTest` importa `TestcontainersConfiguration`: sin él, el test usaría la base del compose, le
+dejaría aplicada la `R__` y la app normal fallaría al arrancar (`Validate failed`); ver `.claude/rules/tests.md`.
+
+Multi-tenant (P-018): toda entidad de negocio lleva `@TenantId UUID organizationId` y Hibernate filtra y asigna la
+organización activa, que da `CurrentOrganization` (`runAs` para procesos sin usuario, o el principal autenticado que
+implementa `OrganizationMember`). Las reglas están en `.claude/rules/java.md` («Persistencia y transacciones»).
 
 El wrapper verifica Maven con `distributionSha256Sum` (`.mvn/wrapper/maven-wrapper.properties`): al cambiar
 `distributionUrl`, poner el `sha256sum` del zip nuevo, verificado contra su `.sha512` de Maven Central.
