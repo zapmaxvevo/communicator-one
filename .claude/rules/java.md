@@ -82,18 +82,23 @@ y local sobre un enum propio del módulo está bien; lo que se evita es repartir
   vuelven vacías y las escrituras fallan.
 - SQL nativo y `JdbcTemplate` **no** pasan por `@TenantId`: filtran por `organization_id` a mano, siempre.
 - Procesos sin usuario (webhooks, jobs, listeners) llaman a `currentOrganization.runAs(organizationId, ...)` **fuera**
-  de la transacción, con el `@Transactional` adentro: la organización se fija al abrir la sesión, y `runAs` dentro de
-  una transacción o de un ámbito transaccional (incluido `SUPPORTS`) lanza `IllegalStateException`.
+  de la transacción, con el `@Transactional` adentro: la organización se fija al abrir la sesión, y `runAs` lanza
+  `IllegalStateException` si hay sincronización de transacción activa (una transacción o un ámbito `SUPPORTS`) o si ya
+  hay una sesión de JPA ligada al hilo (`TransactionSynchronizationManager.hasResource(entityManagerFactory)`: OSIV,
+  `SYNCHRONIZATION_NEVER` o un `EntityManager` ligado a mano).
 - Los cambios de hilo (`@Async`, executors, `CompletableFuture`) no heredan el ámbito de `runAs` ni el
   `SecurityContext`: el código que corre en el otro hilo vuelve a abrir su `runAs`.
-- Los eventos de dominio llevan `organizationId`. Los listeners de eventos que tocan datos de una organización no
-  llevan transacción propia: hacen `runAs(event.organizationId(), ...)` y llaman a un servicio `@Transactional`; no
-  usar `@ApplicationModuleListener` directo para eso. Tampoco un `@TransactionalEventListener(phase = AFTER_COMMIT)`
+- Los eventos de dominio llevan `organizationId`, que se toma del accesor de la entidad (lo asignó Hibernate al
+  persistir). `CurrentOrganization.resolve()` es package-private: fuera de `organizations` no se pregunta la
+  organización activa. Los listeners de eventos que tocan datos de una organización no llevan transacción propia:
+  hacen `runAs(event.organizationId(), ...)` y llaman a un servicio `@Transactional`; no usar
+  `@ApplicationModuleListener` directo para eso. Tampoco un `@TransactionalEventListener(phase = AFTER_COMMIT)`
   síncrono: corre con la sincronización de la transacción todavía activa y `runAs` lanza `IllegalStateException`. El
   listener es `@Async` + `@TransactionalEventListener`, sin `@Transactional`; hace falta `@EnableAsync`, que la app
   todavía no tiene.
-- El aislamiento supone `spring.jpa.open-in-view: false` (`application.yml`). Con OSIV activo, el `EntityManager` se
-  abre al empezar el request con la organización del usuario, y un `runAs` dentro del request la usaría en silencio.
+- La app corre con `spring.jpa.open-in-view: false` (`application.yml`). Con OSIV activo, el `EntityManager` se abre
+  al empezar el request con la organización del usuario y queda ligado al hilo, así que un `runAs` dentro del request
+  lanza `IllegalStateException`.
 - Webhooks idempotentes: restricción única en la base (`externalId` + `ChannelAccount`) y el duplicado se trata como
   éxito.
 - `spring.jpa.hibernate.ddl-auto=validate`. El esquema solo cambia con Flyway.

@@ -13,40 +13,45 @@ import org.hibernate.persister.entity.EntityPersister;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.orm.jpa.support.OpenEntityManagerInViewInterceptor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.context.TestConstructor;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.context.request.ServletWebRequest;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(TestcontainersConfiguration.class)
+@TestConstructor(autowireMode = TestConstructor.AutowireMode.ALL)
 class TenantIsolationTest {
 
-    @Autowired
-    private CurrentOrganization currentOrganization;
-
-    @Autowired
-    private IsolationProbeRepository probes;
-
-    @Autowired
-    private TransactionTemplate transactionTemplate;
-
-    @Autowired
-    private EntityManager entityManager;
-
-    @Autowired
-    private JdbcTemplate jdbcTemplate;
+    private final CurrentOrganization currentOrganization;
+    private final IsolationProbeRepository probes;
+    private final TransactionTemplate transactionTemplate;
+    private final EntityManager entityManager;
+    private final JdbcTemplate jdbcTemplate;
 
     private UUID acme;
     private UUID globex;
     private UUID acmeRecord;
     private UUID globexRecord;
+
+    TenantIsolationTest(CurrentOrganization currentOrganization, IsolationProbeRepository probes,
+            TransactionTemplate transactionTemplate, EntityManager entityManager, JdbcTemplate jdbcTemplate) {
+        this.currentOrganization = currentOrganization;
+        this.probes = probes;
+        this.transactionTemplate = transactionTemplate;
+        this.entityManager = entityManager;
+        this.jdbcTemplate = jdbcTemplate;
+    }
 
     @BeforeEach
     void createTwoOrganizationsWithOneRecordEach() {
@@ -59,6 +64,31 @@ class TenantIsolationTest {
     @AfterEach
     void signOut() {
         SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void recordOfAnotherOrganizationCannotBeDeletedById() {
+        // When
+        currentOrganization.runAs(acme, () -> probes.deleteById(globexRecord));
+
+        // Then
+        assertThat(labelOf(globexRecord)).isEqualTo("Globex record");
+        assertThat(organizationOf(globexRecord)).isEqualTo(globex);
+    }
+
+    @Test
+    void recordOfAnotherOrganizationCannotBeOverwritten() {
+        // Given
+        var overwrite = IsolationProbe.existing(globexRecord, "Overwritten by Acme");
+
+        // When
+        var rejection = catchThrowable(() -> currentOrganization.runAs(acme, () -> probes.save(overwrite)));
+
+        // Then
+        assertThat(rejection).isInstanceOf(DataAccessException.class);
+        assertThat(labelOf(globexRecord)).isEqualTo("Globex record");
+        assertThat(organizationOf(globexRecord)).isEqualTo(globex);
+        assertThat(recordsLabeled("Overwritten by Acme")).isZero();
     }
 
     @Test
@@ -177,6 +207,29 @@ class TenantIsolationTest {
     }
 
     @Test
+    void organizationCannotBeSwitchedWhileASessionIsOpen() {
+        // Given
+        var openSessionInView = new OpenEntityManagerInViewInterceptor();
+        openSessionInView.setEntityManagerFactory(entityManager.getEntityManagerFactory());
+        var request = new ServletWebRequest(new MockHttpServletRequest());
+
+        // When
+        var rejection = catchThrowable(() -> currentOrganization.runAs(acme, () -> {
+            openSessionInView.preHandle(request);
+            try {
+                currentOrganization.runAs(globex,
+                        () -> probes.save(IsolationProbe.labeled("Switched record with open session")));
+            } finally {
+                openSessionInView.afterCompletion(request, null);
+            }
+        }));
+
+        // Then
+        assertThat(rejection).isInstanceOf(IllegalStateException.class);
+        assertThat(recordsLabeled("Switched record with open session")).isZero();
+    }
+
+    @Test
     void organizationIsRequiredToRunInItsScope() {
         // Given
         var actionRan = new AtomicBoolean(false);
@@ -236,6 +289,11 @@ class TenantIsolationTest {
     private UUID organizationOf(UUID recordId) {
         return jdbcTemplate.queryForObject("SELECT organization_id FROM isolation_probes WHERE id = ?",
                 UUID.class, recordId);
+    }
+
+    private String labelOf(UUID recordId) {
+        return jdbcTemplate.queryForObject("SELECT label FROM isolation_probes WHERE id = ?",
+                String.class, recordId);
     }
 
     private int recordsLabeled(String label) {

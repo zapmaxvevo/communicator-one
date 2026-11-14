@@ -34,6 +34,12 @@ class IsolationProbe {
         return new IsolationProbe(label);
     }
 
+    static IsolationProbe existing(UUID id, String label) {
+        var probe = new IsolationProbe(label);
+        probe.id = id;
+        return probe;
+    }
+
     UUID id() {
         return id;
     }
