@@ -24,7 +24,7 @@ Leer antes de trabajar:
 backend/             Spring Boot 4 + Maven wrapper, paquete raíz com.communicatorone
 docker-compose.yml   PostgreSQL 18 y Redis para desarrollo local
 .env.example         variables de entorno (copiar a .env)
-web/                 React + TS + Vite (prevista, issue #3)
+web/                 React 19 + TS estricto + Vite, con ESLint y Vitest (src/{app,features,shared,api})
 docs/                visión, decisiones, multi-tenant, autenticación, personas, oportunidades, equivalencias del backlog
 scripts/             issues.py (issues, subissues y estados del Project con gh)
 .github/             plantillas de issue (tarea, error) y de PR, workflows de CI
@@ -40,7 +40,7 @@ nuevo es un módulo más y rompe `ModularStructureTest` a propósito.
 ## Comandos
 
 Requisitos: Java 25, Docker (para compose y Testcontainers) y `unzip` (para el wrapper de Maven: sin `unzip`,
-`mvnw` baja el tar.gz y falla la verificación contra el hash del zip). Los comandos de la web llegan con el issue #3.
+`mvnw` baja el tar.gz y falla la verificación contra el hash del zip); para la web, Node 24 (ver `web/.nvmrc`).
 
 Entorno local, desde la raíz:
 
@@ -104,8 +104,20 @@ implementa `OrganizationMember`). Las reglas están en `.claude/rules/java.md` (
 El wrapper verifica Maven con `distributionSha256Sum` (`.mvn/wrapper/maven-wrapper.properties`): al cambiar
 `distributionUrl`, poner el `sha256sum` del zip nuevo, verificado contra su `.sha512` de Maven Central.
 
+Web, desde `web/`:
+
+```bash
+npm ci                                   # dependencias exactas de package-lock.json
+npm run dev                              # servidor de desarrollo de Vite
+npm run lint                             # ESLint (el hook ya corre eslint --fix al editar)
+npm test                                 # Vitest con jsdom, una corrida
+npx vitest run src/app/App.test.tsx      # un archivo puntual
+npm run build                            # tsc -b y vite build a dist/
+```
+
 CI: `.github/workflows/backend.yml` corre `./mvnw verify` en push a `main` y en todo PR que toque `backend/`
-(cualquier base, también apilados). No hay checks requeridos (P-012): mirar que el PR esté en verde antes de mergear.
+(cualquier base, también apilados); `.github/workflows/web.yml` hace lo mismo para `web/` con `npm ci`, lint, tests y
+build. No hay checks requeridos (P-012): mirar que el PR esté en verde antes de mergear.
 
 ## Glosario (dominio en español → código en inglés)
 

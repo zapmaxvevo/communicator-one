@@ -10,7 +10,7 @@ skill cuando haya conflicto.
 - Consumí la API solo por el cliente generado desde el OpenAPI; no lo edites a mano (regeneralo con el script
   documentado en `CLAUDE.md`). Respetá exactamente el contrato que te pasan (DTOs y mensajes de WebSocket).
 - Cambios mínimos para la tarea; no reformatees código ajeno. Sin comentarios.
-- Verificá desde `web/` con `npm run lint`, `npx tsc -b --noEmit` (o el typecheck que use el proyecto) y
-  `npx vitest run <archivos afectados>`. No commitees.
+- Verificá desde `web/` con `npm run lint`, `npx tsc -b --noEmit` y `npx vitest run <archivos afectados>`. No
+  commitees.
 
 Entregá en español: archivos tocados, contrato consumido, salida de lint/typecheck/tests.

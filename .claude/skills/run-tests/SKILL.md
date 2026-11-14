@@ -3,8 +3,8 @@ name: run-tests
 description: Corre los tests del backend (Maven + JUnit 5 + Testcontainers) o de la web (Vitest) con los comandos correctos. Usar cuando se pida correr tests, verificar un cambio o chequear un módulo o test puntual. Opcionalmente recibe una clase, un paquete o un archivo (ej. "PersonTest", "people", "web/src/features/inbox").
 ---
 
-Correr los tests del proyecto. Los comandos definitivos están en `CLAUDE.md` (sección «Comandos»; los de la web llegan
-con el issue #3); si difieren de lo que dice acá, manda `CLAUDE.md`.
+Correr los tests del proyecto. Los comandos definitivos están en `CLAUDE.md` (sección «Comandos»); si difieren de lo
+que dice acá, manda `CLAUDE.md`.
 
 ## Backend (`backend/`)
 
