@@ -19,7 +19,9 @@ Para tests seguí `tests.md`; para migraciones, `flyway.md`.
   `channels`, `assignment`, `notifications`). El paquete raíz del módulo es su API pública; los subpaquetes son internos y nadie
   de afuera los importa. `ApplicationModules.verify()` tiene que pasar siempre.
 - Entre módulos: llamadas a la API pública o eventos de dominio. Efectos que no tienen que bloquear al que publica
-  (notificar por WebSocket, arrancar un temporizador) van por evento, después del commit.
+  (notificar por WebSocket, arrancar un temporizador) van por evento, después del commit: el evento se publica
+  cuando la escritura que lo origina ya está confirmada (por ejemplo, `MessageReceived` sale después de la transacción
+  que guardó el mensaje), no necesariamente en la fase `AFTER_COMMIT` de una transacción abierta.
 - Hexagonal: el dominio no depende de Spring Web, de SDKs de proveedores ni de detalles HTTP. Canales y reparto son
   adaptadores detrás de un puerto (`ChannelAdapter`, `AssignmentStrategy`).
 
@@ -97,12 +99,16 @@ y local sobre un enum propio del módulo está bien; lo que se evita es repartir
   `SecurityContext`: el código que corre en el otro hilo vuelve a abrir su `runAs`.
 - Los eventos de dominio llevan `organizationId`, que se toma del accesor de la entidad (lo asignó Hibernate al
   persistir). `CurrentOrganization.resolve()` es package-private: fuera de `organizations` no se pregunta la
-  organización activa. Los listeners de eventos que tocan datos de una organización no llevan transacción propia:
-  hacen `runAs(event.organizationId(), ...)` y llaman a un servicio `@Transactional`; no usar
-  `@ApplicationModuleListener` directo para eso. Tampoco un `@TransactionalEventListener(phase = AFTER_COMMIT)`
-  síncrono: corre con la sincronización de la transacción todavía activa y `runAs` lanza `IllegalStateException`. El
-  listener es `@Async` + `@TransactionalEventListener`, sin `@Transactional`; hace falta `@EnableAsync`, que la app
-  todavía no tiene.
+  organización activa. Hay **una sola** forma de escuchar un evento que toca datos de una organización:
+  `@Async @TransactionalEventListener(fallbackExecution = true)`, sin `@Transactional`, que hace
+  `runAs(event.organizationId(), ...)` y llama a un servicio `@Transactional`. Corre después del commit si el evento
+  se publicó dentro de una transacción, y en el momento si se publicó fuera (como `MessageReceived`, P-051). No usar
+  `@ApplicationModuleListener` (corre en una transacción `REQUIRES_NEW`, donde `runAs` lanza), ni un
+  `@TransactionalEventListener` síncrono (en `AFTER_COMMIT` la sincronización sigue activa y `runAs` lanza
+  `IllegalStateException`), ni uno sin `fallbackExecution` (no se dispara con un evento publicado fuera de una
+  transacción). Hace falta `@EnableAsync`, que la app todavía no tiene: sin ella, `@Async` no hace nada, y un evento
+  publicado dentro de una transacción correría el listener en `AFTER_COMMIT` síncrono (`runAs` lanza) y uno publicado
+  fuera lo correría en el hilo del webhook. #10 no la agrega porque la app todavía no tiene listeners.
 - La app corre con `spring.jpa.open-in-view: false` (`application.yml`). Con OSIV activo, el `EntityManager` se abre
   al empezar el request con la organización del usuario y queda ligado al hilo, así que un `runAs` dentro del request
   lanza `IllegalStateException`.

@@ -21,10 +21,11 @@ Además, `OpportunityClosingJob` corre cada hora (cron configurable) y persiste 
 que nadie toca, con la misma regla y la misma fecha: recorre las organizaciones con oportunidades abiertas y, en una
 transacción por organización, cierra las que llevan N días o más sin actividad (ver «Job de cierre»).
 
-`recordActivity` se va a activar con cada mensaje entrante: el flujo entrante (#10) resuelve la persona, registra la
-actividad y guarda el mensaje con el id de la oportunidad (`Timeline.recordReceived`, #8, ver `docs/mensajes.md`). En
-#36, «actividad» es un mensaje entrante; si los salientes cuentan se decide con su tarea. Hoy nadie la llama fuera de
-los tests.
+`recordActivity` la llama el pipeline entrante (`InboundPipeline`, #10, `docs/canales.md`) con cada mensaje nuevo:
+resuelve la persona, registra la actividad con el nombre del canal como fuente y guarda el mensaje con el id de la
+oportunidad (`Timeline.recordReceived`, #8, ver `docs/mensajes.md`). En #36, «actividad» es un mensaje entrante; si
+los salientes cuentan se decide con su tarea. Como el pipeline todavía no tiene endpoint (P-049), hoy solo se ejercita
+desde los tests.
 
 Fuera de #36 y #37: el responsable y el reparto (#13; la columna `owner_id` existe pero queda nula), el cierre manual
 con `WON`/`LOST` (#15), eventos y endpoints REST.
@@ -82,31 +83,38 @@ Quien llama a `recordActivity`:
 3. **Pasa una persona de la organización activa**, resuelta antes con `PersonDirectory.resolveOrCreate`.
 4. **Pasa la fuente** como etiqueta opaca (por ejemplo, el canal o la campaña). Se valida que tenga texto y se guarda
    tal cual, sin recortar; solo se usa al abrir una oportunidad nueva. Una actividad que continúa o reabre no la cambia.
-5. **Descarta antes los duplicados**: #10 descarta el mensaje repetido con `Timeline.isRecorded(channelAccountId,
-   externalId)` antes de llamar, porque cada llamada cuenta como actividad nueva.
+   El pipeline entrante pasa el nombre del tipo de la cuenta de canal, `account.channelType().name()` (`"SANDBOX"`,
+   después `"WHATSAPP"`; P-050).
+5. **Descarta antes los duplicados**: `InboundPipeline` descarta el mensaje repetido con
+   `Timeline.isRecorded(channelAccountId, externalId)` antes de llamar, porque cada llamada cuenta como actividad nueva.
 
-Flujo entrante (#10), en tres transacciones de escritura (persona, oportunidad, mensaje), más la de solo lectura de
-`isRecorded`:
+Flujo entrante, como quedó en `InboundPipeline.accept` (#10, `InboundPipeline.java:69-81`; detalle en
+`docs/canales.md`): dentro del `runAs` de la organización de la cuenta, primero la transacción de solo lectura de
+`isRecorded` y después tres de escritura (persona, oportunidad, mensaje):
 
 ```java
-currentOrganization.callAs(organizationId, () -> {
-    var personId = personDirectory.resolveOrCreate(identity);                     // tx 1
-    if (timeline.isRecorded(channelAccountId, externalId)) {                      // solo lectura
-        return null;                                                              // reenvío: no cuenta como actividad
-    }
-    var opportunityId = opportunityTracker.recordActivity(personId, source);      // tx 2
-    var recorded = timeline.recordReceived(new ReceivedMessage(personId, opportunityId, channelAccountId,
-            channel, externalId, content, occurredAt));                           // tx 3 (#8)
-    // #10 publica «mensaje recibido» solo si !recorded.duplicate()
-    return recorded;
-});
+if (timeline.isRecorded(account.id(), inbound.externalId())) {                    // solo lectura
+    return;                                                                       // reenvío: no cuenta como actividad
+}
+var personId = people.resolveOrCreate(inbound.sender());                          // tx 1
+var opportunityId = opportunities.recordActivity(personId, account.channelType().name());   // tx 2
+var recorded = timeline.recordReceived(new ReceivedMessage(personId, opportunityId, account.id(),
+        account.channelType(), inbound.externalId(), inbound.content(), inbound.occurredAt()));   // tx 3 (#8)
+if (!recorded.duplicate()) {
+    events.publishEvent(new MessageReceived(...));                                // evento de channels, P-051
+}
 ```
 
 Si la tercera falla, la actividad ya quedó registrada (la oportunidad abierta o con `lastActivityAt` adelantado) sin
 mensaje. El reintento del webhook vuelve a llamar a `recordActivity`, que continúa la misma oportunidad. `isRecorded`
-no es autoritativo: dos copias del mismo webhook en paralelo pueden pasarlo las dos y registrar dos actividades, pero
+no es autoritativo: dos copias del mismo webhook en paralelo pueden pasarlo las dos y registrar dos actividades (solo
+`lastActivityAt` puede quedar en el mayor de dos instantes casi iguales, lo que se acepta, P-050), pero
 `recordReceived` guarda un solo mensaje y solo una de las dos recibe `RecordedMessage.duplicate = false` (ver
 `docs/mensajes.md`).
+
+`MessageReceived` es un evento de `channels`, no de este módulo: `opportunities` sigue sin publicar eventos (P-032,
+ajustada en #10). No dice si la oportunidad es nueva: eso lo resuelve el reparto (#13), y lo que necesite garantía de
+entrega va a colgar de un evento de `opportunities` publicado en su transacción (P-051).
 
 ## Reglas
 
@@ -749,8 +757,9 @@ Fixture (`OpportunitiesFixture`), lo agregado en #37:
 - **V6 (#8) agrega un `UNIQUE (id, person_id, organization_id)` a `opportunities`**, para la FK de los mensajes. Con
   esa FK, cambiar el `person_id` de una oportunidad con mensajes (fusión de personas, P-030) va a necesitar FK
   `DEFERRABLE` u `ON UPDATE CASCADE` (`docs/mensajes.md`, «Riesgos»).
-- **Tres transacciones en #10**: si falla el guardado del mensaje, la actividad queda registrada sin mensaje. El
-  reintento del webhook continúa la misma oportunidad, pero adelanta otra vez `last_activity_at`.
+- **Tres transacciones en #10** (`InboundPipeline`, P-050): si falla el guardado del mensaje, la actividad queda
+  registrada sin mensaje. El reintento del webhook continúa la misma oportunidad, pero adelanta otra vez
+  `last_activity_at`.
 - **Hora de procesamiento, no del proveedor**: un webhook que llega tarde (reintentos del proveedor) cuenta como
   actividad de cuando se procesa. Con varias instancias, un desfase de relojes entre ellas no hace retroceder
   `last_activity_at` (el dominio se queda con la mayor), pero sí puede fechar una apertura, una reapertura o la
@@ -790,11 +799,14 @@ Fixture (`OpportunitiesFixture`), lo agregado en #37:
 - **V5 usa `CREATE INDEX` sin `CONCURRENTLY`**: bloquea las escrituras en `opportunities` mientras se crea. Hoy la
   tabla no tiene datos productivos; con tablas grandes, va `CONCURRENTLY` en una migración propia
   (`.claude/rules/flyway.md`).
-- **El responsable** (`owner_id`) queda siempre nulo hasta el reparto (#13), y no hay eventos hasta entonces.
+- **El responsable** (`owner_id`) queda siempre nulo hasta el reparto (#13), y `opportunities` no publica eventos hasta
+  entonces (el `MessageReceived` de #10 es de `channels`).
 - Los tests de las carreras dependen de `pg_stat_activity` (PostgreSQL), y el de la falla por organización, de un
   trigger plpgsql. El del lock timeout tarda lo que el `closing-lock-timeout` de los tests (2 s).
 
 ## Pendiente: #13
 
 **#13 (reparto)**: asigna el responsable de las oportunidades nuevas (la columna y su FK ya están) y publica los
-eventos que necesite.
+eventos que necesite, dentro de su transacción y con el registro de publicaciones (`spring-modulith-starter-jpa` y
+`event_publication`), porque `MessageReceived` se entrega como mucho una vez y no dice si la oportunidad es nueva
+(P-051).

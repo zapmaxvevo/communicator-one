@@ -1,10 +1,12 @@
 # Canales y cuentas de canal
 
-Issues #42 y #43 (partes de #9). Decisiones en `docs/decisiones.md`: P-043 (entidad y alcance), P-044 (unicidad
-global y resolución entre organizaciones), P-045 (FK de tres columnas desde `messages`, que reemplaza la de dos columnas
-que anunciaba P-039), P-046 (forma del puerto `ChannelAdapter`), P-047 (registro de adaptadores) y P-048 (adaptador
-`SANDBOX`). Se apoya en `docs/multi-tenant.md`, en los mensajes de `docs/mensajes.md` y en las identidades de
-`docs/personas.md`.
+Issues #42 y #43 (partes de #9) y #10 (pipeline de entrada). Decisiones en `docs/decisiones.md`: P-043 (entidad y
+alcance), P-044 (unicidad global y resolución entre organizaciones), P-045 (FK de tres columnas desde `messages`, que
+reemplaza la de dos columnas que anunciaba P-039), P-046 (forma del puerto `ChannelAdapter`), P-047 (registro de
+adaptadores), P-048 (adaptador `SANDBOX`), P-049 (ubicación del pipeline y sin endpoint), P-050 (orden, transacciones
+y casos borde del pipeline) y P-051 (evento `MessageReceived` y listeners). Se apoya en `docs/multi-tenant.md`, en los
+mensajes de `docs/mensajes.md`, en las identidades de `docs/personas.md` y en las oportunidades de
+`docs/oportunidades.md`.
 
 ## Resumen
 
@@ -16,9 +18,8 @@ WhatsApp, el id de la página, el id del bot.
 Cuando llega un webhook, el proveedor dice a qué cuenta suya iba dirigido, pero no a qué organización. Por eso el
 módulo `channels` resuelve la cuenta **sin organización activa**: `ChannelAccountDirectory.resolve(channelType,
 externalAccountId)` busca la cuenta en todas las organizaciones y la devuelve con su `organizationId`, para que el
-pipeline entrante (#10) abra el ámbito de esa organización antes de resolver la persona, la oportunidad y el mensaje.
-
-Se va a activar con cada webhook que procese #10. Hoy nadie llama a `resolve` fuera de los tests.
+pipeline entrante (`InboundPipeline`, #10) abra el ámbito de esa organización antes de resolver la persona, la
+oportunidad y el mensaje.
 
 La base también controla, desde #42, que todo mensaje apunte a una cuenta que existe, que es de su misma organización
 y cuyo tipo coincide con el `channel` del mensaje (FK de tres columnas, P-045).
@@ -30,22 +31,31 @@ texto a una identidad de contacto desde una cuenta nuestra. `ChannelAdapterRegis
 propio (ver «Formato del payload del sandbox») y guarda en memoria lo que «envía», para que los tests afirmen con
 `hasSentTextTo(identidad, texto)` sin un proveedor real.
 
-El puerto y el registro se van a activar con cada webhook que procese #10 y con cada envío de #12. Hoy nadie los usa
-fuera de sus tests unitarios.
+Desde #10, `InboundPipeline.receive(channelType, payload)` procesa un webhook de punta a punta: parsea con el adaptador
+del canal todos los mensajes y estados, y recién después escribe. Por cada mensaje resuelve la cuenta (y con ella la
+organización), descarta el reenvío, resuelve o crea la persona, registra la actividad en su oportunidad, guarda el
+mensaje y, si no era un duplicado, publica el evento `MessageReceived`. Por cada estado, lo aplica con
+`Timeline.applyStatus` al mensaje con ese `externalId` en la cuenta. Un mensaje o estado para una cuenta que no
+conocemos se descarta con un WARN. Se va a activar con cada webhook cuando una tarea exponga el endpoint; hoy solo lo
+llaman los tests (ver «Pipeline de entrada (#10)»).
 
-Fuera de #42 y #43: el pipeline entrante y el endpoint de webhooks (#10); credenciales, URL o secreto del webhook,
-«tiene bot», alta, baja y listado de cuentas, y el adaptador de WhatsApp con la firma de Meta (#11); el envío, que va a
-leer `allowsOutbound`, las fallas de envío, `windowState` y `startConversation` (#12).
+Fuera de #42, #43 y #10: el endpoint de webhooks, su seguridad (ruta pública y firma) y la traducción a HTTP de las
+excepciones del pipeline (la tarea que exponga el endpoint, P-049); credenciales, URL o secreto del webhook, «tiene
+bot», alta, baja y listado de cuentas, el adaptador de WhatsApp con la firma de Meta y el nombre visible de la persona
+(#11); el envío, que va a leer `allowsOutbound`, las fallas de envío, `windowState` y `startConversation` (#12); los
+listeners de `MessageReceived` y los eventos de `opportunities` que necesiten garantía de entrega (#13 a #15, P-051).
 
 ## Piezas
 
 Módulo `channels` (`backend/src/main/java/com/communicatorone/channels/`). Depende solo de tipos públicos de la raíz
-de otros módulos: de `messaging`, `ChannelType` (P-038) y, desde #43, `MessageContent` y `MessageStatus`; de
-`organizations`, `CurrentOrganization`; y, desde #43, de `people`, `ContactIdentity`, `IdentityKind` e
-`InvalidContactIdentityException`. No hay ciclo: ni `messaging` ni `people` conocen a `channels`. Todo es
-package-private y vive en el paquete raíz del módulo, sin subpaquetes: el único consumidor previsto es #10, que vive
-en el mismo módulo (P-043), y los adaptadores van planos en la raíz con el canal como prefijo (`SandboxChannelAdapter`;
-después `WhatsAppChannelAdapter`, P-046).
+de otros módulos: de `messaging`, `ChannelType` (P-038), desde #43 `MessageContent` y `MessageStatus`, y desde #10
+`Timeline` y `ReceivedMessage`; de `organizations`, `CurrentOrganization`; de `people`, desde #43 `ContactIdentity`,
+`IdentityKind` e `InvalidContactIdentityException`, y desde #10 `PersonDirectory`; y, desde #10, de `opportunities`,
+`OpportunityTracker` (dependencia nueva, P-049). No hay ciclo: ni `messaging`, ni `people`, ni `opportunities` conocen
+a `channels`. Todo es package-private salvo el evento `MessageReceived` (público desde #10, para que otros módulos lo
+escuchen) y vive en el paquete raíz del módulo, sin subpaquetes: el pipeline de #10 vive en el mismo módulo (P-043,
+P-049), y los adaptadores van planos en la raíz con el canal como prefijo (`SandboxChannelAdapter`; después
+`WhatsAppChannelAdapter`, P-046).
 
 Cuentas de canal (#42):
 
@@ -61,19 +71,27 @@ Puerto, registro y adaptador de prueba (#43):
 |---|---|---|
 | `ChannelAdapter` | package-private | Interfaz del puerto (`ChannelAdapter.java:8-17`): `type()`, `parseInbound(WebhookPayload)`, `parseStatusUpdates(WebhookPayload)` y `send(ContactIdentity to, ChannelAccount from, MessageContent content)`. Contrato en «Puerto de canal». |
 | `WebhookPayload` | package-private | `record (String body)`: el cuerpo del webhook tal como llegó. Exige `body` no nulo (`WebhookPayload.java:7-9`); el cuerpo vacío lo rechaza el adaptador. `toString` devuelve `WebhookPayload[body]`, sin el cuerpo, que trae datos personales (`WebhookPayload.java:11-14`). Sin headers ni bytes crudos (P-046). |
-| `InboundMessage` | package-private | `record (externalAccountId, ContactIdentity sender, externalId, MessageContent content, Instant occurredAt)` (`InboundMessage.java:8-9`). El constructor compacto exige los cinco con `Assert` (`InboundMessage.java:11-17`); no recorta (el id de cuenta lo recorta `resolve`). No lleva el tipo de canal: lo da el adaptador o la cuenta resuelta (P-045). |
-| `StatusUpdate` | package-private | `record (externalAccountId, externalId, MessageStatus status)` (`StatusUpdate.java:6`), con los tres obligatorios (`StatusUpdate.java:8-12`). |
+| `InboundMessage` | package-private | `record (externalAccountId, ContactIdentity sender, externalId, MessageContent content, Instant occurredAt)` (`InboundMessage.java:8-9`). El constructor compacto exige los cinco con `Assert` y rechaza U+0000 (NUL) en el id de cuenta, el valor de la identidad, el `externalId` y el texto, con un `Assert.doesNotContain(campo, "\0", …)` por campo (`InboundMessage.java:11-21`, `:17-20`); no recorta (el id de cuenta lo recorta `resolve`). No lleva el tipo de canal: lo da el adaptador o la cuenta resuelta (P-045). |
+| `StatusUpdate` | package-private | `record (externalAccountId, externalId, MessageStatus status)` (`StatusUpdate.java:6`), con los tres obligatorios y sin U+0000 (NUL) en el id de cuenta ni en el `externalId`, también con `Assert.doesNotContain` (`StatusUpdate.java:8-14`, `:12-13`). |
 | `SendResult` | package-private | `record (String externalId)`: el id que el proveedor le dio al mensaje enviado, obligatorio (`SendResult.java:5-9`). Las fallas de envío las modela #12. |
 | `InvalidWebhookPayloadException` | package-private | Unchecked. Mensaje `Invalid <tipo> webhook payload`, sin causa encadenada ni detalle (`InvalidWebhookPayloadException.java:5-10`): el error del parser puede citar fragmentos del payload, como el valor de un teléfono (mismo criterio que `InvalidContactIdentityException`). |
 | `ChannelAdapterRegistry` | package-private | `@Component` que recibe todos los beans `ChannelAdapter` (`ChannelAdapterRegistry.java:15-19`) y los indexa por `type()`. `adapterFor(ChannelType)` (`ChannelAdapterRegistry.java:21-27`). Contrato en «Registro de adaptadores». |
 | `UnsupportedChannelException` | package-private | Unchecked. Mensaje `No channel adapter handles <tipo>` (`UnsupportedChannelException.java:5-10`). |
 | `SandboxChannelAdapter` | package-private | `@Component` del canal `SANDBOX` (`SandboxChannelAdapter.java:22-132`), siempre activo. Parsea el JSON propio del sandbox con records anidados package-private y guarda los envíos en memoria; `hasSentTextTo` es la consulta para los tests. Detalle en «Adaptador `SANDBOX`». |
 
+Pipeline de entrada (#10):
+
+| Clase | Visibilidad | Qué hace |
+|---|---|---|
+| `InboundPipeline` | package-private | `@Service` sin `@Transactional` (`InboundPipeline.java:16-17`) con un único método, `receive(ChannelType, WebhookPayload)` (`InboundPipeline.java:43-54`). Recibe en el constructor package-private `ChannelAdapterRegistry`, `ChannelAccountDirectory`, `CurrentOrganization`, `PersonDirectory`, `OpportunityTracker`, `Timeline` y el `ApplicationEventPublisher` de Spring (`InboundPipeline.java:31-41`). Privados: `inOrganizationOf` (resolver la cuenta y correr la acción en el `runAs` de su organización, o descartar con WARN), `loggable` (sanear el id para el log) y `accept` (un mensaje). Contrato en «Pipeline de entrada (#10)». |
+| `MessageReceived` | **pública** (API) | `record (UUID organizationId, UUID messageId, UUID personId, UUID opportunityId, UUID channelAccountId, ChannelType channel)` (`MessageReceived.java:6-8`): el evento de un mensaje entrante nuevo. Sin texto ni identidad del remitente (datos personales). Semántica en «Evento `MessageReceived`». |
+
 El `package-info.java` con `@ApplicationModule` ya existía desde el scaffold y `ModularStructureTest` ya declaraba
 `channels`. #42 suma la migración V7 (ver «Esquema»), que además agrega una restricción a `messages`. #43 no tiene
 migración: `channel_accounts.channel_type` y `messages.channel` son `TEXT` sin `CHECK`, así que `SANDBOX`
 (`ChannelType.java:11`) entra sin tocar el esquema, y no aparece en `backend/openapi.json` (ningún endpoint lo
-expone).
+expone). #10 tampoco tiene migración ni cambia `SecurityConfiguration`, `ApiExceptionHandler`, `openapi.json` ni el
+`pom.xml` (sin `spring-modulith-starter-jpa`, P-009).
 
 ## Contrato de `resolve` (para #10)
 
@@ -106,17 +124,19 @@ Quien llama a `resolve`:
    ligada al hilo sin sincronización (OSIV, que la app tiene apagado): ese caso lo sigue frenando `callAs`, solo si la
    cuenta existe.
 2. **Trata el `Optional.empty()` como «webhook para una cuenta que no conocemos»**: no hay organización a la que
-   asignarlo. Qué responde al proveedor lo decide #10.
-3. **Después abre el ámbito de la organización de la cuenta** y pasa el tipo de la cuenta como canal del mensaje:
+   asignarlo. `InboundPipeline` lo descarta con un WARN y sigue (ver «Cuenta desconocida»).
+3. **Después abre el ámbito de la organización de la cuenta** y pasa el tipo de la cuenta como canal del mensaje. Así
+   lo hace `InboundPipeline` (`InboundPipeline.java:48`, `:56-62`, `:75-76`):
 
 ```java
-directory.resolve(channelType, payloadAccountId).ifPresent(account ->
-        currentOrganization.runAs(account.organizationId(), () -> {
-            var personId = personDirectory.resolveOrCreate(identity);
-            // ... isRecorded, recordActivity ...
-            timeline.recordReceived(new ReceivedMessage(personId, opportunityId, account.id(),
-                    account.channelType(), externalId, content, occurredAt));
-        }));
+inOrganizationOf(channelType, inbound.externalAccountId(), account -> accept(account, inbound));
+// inOrganizationOf:
+accounts.resolve(channelType, externalAccountId).ifPresentOrElse(
+        account -> currentOrganization.runAs(account.organizationId(), () -> action.accept(account)),
+        () -> log.warn(...));
+// dentro de accept:
+timeline.recordReceived(new ReceivedMessage(personId, opportunityId, account.id(),
+        account.channelType(), inbound.externalId(), inbound.content(), inbound.occurredAt()));
 ```
 
 Pasar `account.channelType()` (y no un tipo que el pipeline arme por su cuenta) es lo que garantiza que el mensaje
@@ -150,7 +170,7 @@ Dónde encaja en el flujo entrante de #10:
 
 ```mermaid
 sequenceDiagram
-    participant W as Webhook (#10)
+    participant W as InboundPipeline (#10)
     participant D as ChannelAccountDirectory
     participant DB as PostgreSQL
     participant CO as CurrentOrganization
@@ -221,13 +241,13 @@ interface ChannelAdapter {
 | `parseStatusUpdates(payload)` | Los reportes de estado de mensajes salientes, en el orden del payload, como `StatusUpdate(externalAccountId, externalId, status)`. No deduplica ni reordena: un `READ` seguido de un `DELIVERED` del mismo mensaje sale así, y la regla de avance la aplica `Timeline.applyStatus` con `Message.advanceTo` (P-041). Sin reportes, lista vacía. Payload inválido: `InvalidWebhookPayloadException`. |
 | `send(to, from, content)` | Manda el texto a la identidad desde nuestra cuenta y devuelve `SendResult` con el id que le dio el proveedor (el que después llega en los `StatusUpdate`). Las fallas de envío y la validación de la ventana y de `allowsOutbound` son de #12. |
 
-El adaptador no toca la base, no conoce la organización (la saca #10 de la cuenta con `resolve`) ni la persona: recibe
-y devuelve value objects (`ContactIdentity`, `MessageContent`) y la cuenta de canal, no la entidad `Person`, que es
-interna de `people` (P-019).
+El adaptador no toca la base, no conoce la organización (la saca `InboundPipeline` de la cuenta con `resolve`) ni la
+persona: recibe y devuelve value objects (`ContactIdentity`, `MessageContent`) y la cuenta de canal, no la entidad
+`Person`, que es interna de `people` (P-019).
 
-Del lado de #10, la idea es: `registry.adapterFor(tipo)` → `parseInbound` → por cada `InboundMessage`,
-`directory.resolve(tipo, externalAccountId)` y el flujo de «Contrato de `resolve`», con `externalId`, `content` y
-`occurredAt` del `InboundMessage` y `sender` como identidad para `PersonDirectory.resolveOrCreate`.
+`InboundPipeline` usa `registry.adapterFor(tipo)`, `parseInbound` y `parseStatusUpdates`; de cada `InboundMessage`
+toma `externalAccountId` para `resolve`, `sender` como identidad para `PersonDirectory.resolveOrCreate`, y
+`externalId`, `content` y `occurredAt` para el mensaje (ver «Pipeline de entrada (#10)»).
 
 ## Registro de adaptadores (`ChannelAdapterRegistry`)
 
@@ -241,11 +261,11 @@ un mapa inmutable por `type()`.
 | Dos adaptadores con el mismo `type()` en el constructor | `IllegalStateException` («Channel type SANDBOX has two adapters: SandboxChannelAdapter and AdapterStandIn», `ChannelAdapterRegistry.java:29-32`). En la app, el contexto de Spring no levanta |
 
 Un tipo sin adaptador no impide arrancar: falla recién al pedirlo (hoy solo `SANDBOX` tiene adaptador). Ninguna de
-las dos excepciones se traduce a HTTP: no hay endpoint (P-047).
+las dos excepciones se traduce a HTTP: no hay endpoint (P-047; #10 tampoco lo expone, P-049).
 
 ## Adaptador `SANDBOX` (`SandboxChannelAdapter`)
 
-Canal de prueba en memoria: sirve como borde falso en los tests de los flujos que vienen (#10, #12), en lugar de
+Canal de prueba en memoria: sirve como borde falso en los tests de los flujos (#10, y después #12), en lugar de
 Meta o Telegram (`.claude/rules/tests.md`), y para probar a mano cuando exista el endpoint de webhooks. Es un bean
 siempre activo, sin perfil ni propiedad (P-048).
 
@@ -272,16 +292,16 @@ Un JSON propio (no imita a ningún proveedor), con un objeto por webhook:
 
 | Campo | Regla | Pasa a |
 |---|---|---|
-| `account` | Obligatorio, no en blanco (`SandboxChannelAdapter.java:71`) | `externalAccountId` de todos los mensajes y estados del payload |
+| `account` | Obligatorio, no en blanco (`SandboxChannelAdapter.java:71`), sin U+0000 (ver «Parseo y payloads inválidos») | `externalAccountId` de todos los mensajes y estados del payload |
 | `messages` | Opcional: ausente o `null` es lista vacía; un elemento `null` es inválido (`SandboxChannelAdapter.java:72-75`) | Un `InboundMessage` por elemento, en orden |
-| `messages[].id` | Obligatorio, no en blanco (lo exige `InboundMessage`, `InboundMessage.java:14`) | `externalId` (único por cuenta, P-042) |
+| `messages[].id` | Obligatorio, no en blanco (lo exige `InboundMessage`, `InboundMessage.java:14`), sin U+0000 | `externalId` (único por cuenta, P-042) |
 | `messages[].from` | Obligatorio, objeto con `kind` y `value` (`SandboxChannelAdapter.java:90`) | `sender` |
 | `messages[].from.kind` | Obligatorio (`SandboxChannelAdapter.java:107`); nombre exacto de `IdentityKind`, en mayúsculas: `PHONE`, `EMAIL`, `INSTAGRAM_USER`, `MESSENGER_USER`, `TELEGRAM_USER`. Un nombre desconocido o un número (`0`) los rechaza Jackson al leer el enum | `sender.kind` |
-| `messages[].from.value` | Obligatorio; se normaliza con `new ContactIdentity(kind, value)` (`SandboxChannelAdapter.java:110-112`), que también rechaza el valor nulo o en blanco: teléfono a E.164, email a minúsculas, usuarios recortados (`docs/personas.md`) | `sender.value` |
-| `messages[].text` | Obligatorio y no vacío (lo exige `MessageContent`); se aceptan espacios y no se recorta | `content` |
+| `messages[].from.value` | Obligatorio; se normaliza con `new ContactIdentity(kind, value)` (`SandboxChannelAdapter.java:110-112`), que también rechaza el valor nulo o en blanco: teléfono a E.164, email a minúsculas, usuarios recortados (`docs/personas.md`). Sin U+0000, salvo con `PHONE`, donde lo resuelve la normalización (ver «Parseo y payloads inválidos») | `sender.value` |
+| `messages[].text` | Obligatorio y no vacío (lo exige `MessageContent`); se aceptan espacios y no se recorta; sin U+0000 | `content` |
 | `messages[].sentAt` | Obligatorio (`SandboxChannelAdapter.java:91`); texto con un instante ISO-8601, que se convierte con `Instant.parse` (`SandboxChannelAdapter.java:95`). Un desfase (`2026-03-02T05:59:20-03:00`) pasa a UTC; un número, un epoch como texto (`"1700000000"`) o espacios alrededor se rechazan. No se completa con el reloj | `occurredAt` |
 | `statuses` | Opcional, como `messages` | Un `StatusUpdate` por elemento, en orden |
-| `statuses[].messageId` | Obligatorio, no en blanco (lo exige `StatusUpdate`, `StatusUpdate.java:10`): el `externalId` que devolvió `send` | `externalId` |
+| `statuses[].messageId` | Obligatorio, no en blanco (lo exige `StatusUpdate`, `StatusUpdate.java:10`): el `externalId` que devolvió `send`; sin U+0000 | `externalId` |
 | `statuses[].status` | Obligatorio (lo exige `StatusUpdate`, `StatusUpdate.java:11`, que solo pide no nulo); nombre exacto de `MessageStatus`: `SENT`, `FAILED`, `DELIVERED`, `READ`, `DELETED`. El nombre lo controla Jackson al leer el enum, que también rechaza un número (`1`) o un número como texto (`"1"`) | `status` |
 
 Salida del ejemplo (como en `SandboxChannelAdapterTest`):
@@ -348,6 +368,19 @@ puede citar el payload). No hay `catch (Exception)`: un error que no sea de dato
 | `"sentAt": "ayer a la tarde"`, `"sentAt": 1700000000` | `Instant.parse` lanza `DateTimeParseException` (el número llega como el texto `"1700000000"`) |
 | `"messages": [null]`, `"statuses": [null]` | `Assert.noNullElements` de `SandboxWebhook` |
 | Estado sin `messageId` o sin `status` | `Assert` de `StatusUpdate` |
+| Un U+0000 (NUL, `\u0000` en el JSON) en `account`, `messages[].id`, `text`, `statuses[].messageId`, o en `from.value` con `EMAIL` o un usuario de canal | `Assert.doesNotContain` de `InboundMessage` o de `StatusUpdate` (`InboundMessage.java:17-20`, `StatusUpdate.java:12-13`), que lanza `IllegalArgumentException` |
+| Un U+0000 en medio de `from.value` con `PHONE` (`"+54911\u00005550101"`) | No llega a `InboundMessage`: libphonenumber no lo reconoce como teléfono y `ContactIdentity` lanza `InvalidContactIdentityException` |
+
+Con `PHONE`, un NUL al principio o al final de `from.value` no invalida el payload: `strip` no lo quita (no es espacio),
+pero libphonenumber descarta lo que hay antes del primer `+` o dígito y después del último dígito, así que
+`"+5491155550101\u0000"` queda `+5491155550101` en silencio (`ContactIdentity.java:36-38`, `:44-50`). En ningún caso un
+NUL llega a la base.
+
+El NUL se rechaza en el parseo porque PostgreSQL no lo acepta en una columna `TEXT`: antes llegaba a la base y fallaba
+recién al escribir, con los mensajes anteriores del payload, y del que fallaba la persona y la actividad, ya
+confirmados (o los estados anteriores, si el NUL estaba en un estado). Ahora el payload entero se rechaza antes de la
+primera escritura. El de `account` se detecta al armar el primer mensaje o estado: un payload sin ninguno no se
+rechaza, pero tampoco escribe nada.
 
 `WebhookPayload` con `body` nulo no llega al adaptador: lo rechaza su propio constructor con
 `IllegalArgumentException` («A webhook payload needs its body»).
@@ -415,7 +448,7 @@ flowchart TD
     R -->|JSON roto, campo o enum desconocidos,<br/>enum como número,<br/>falta account, from, sentAt o kind,<br/>elemento null| X[InvalidWebhookPayloadException<br/>Invalid SANDBOX webhook payload]
     R -->|null| X
     R --> B["arma las dos listas:<br/>InboundMessage (ContactIdentity, MessageContent)<br/>y StatusUpdate"]
-    B -->|falta id, messageId o status, fecha inválida,<br/>identidad o texto inválidos| X
+    B -->|falta id, messageId o status, fecha inválida,<br/>identidad o texto inválidos, NUL U+0000| X
     B --> S[SandboxNotifications]
     S -->|parseInbound| I[List de InboundMessage]
     S -->|parseStatusUpdates| U[List de StatusUpdate]
@@ -435,6 +468,236 @@ sequenceDiagram
     S->>Q: contains(SandboxDelivery(to, content))
     S-->>T: true
 ```
+
+## Pipeline de entrada (#10)
+
+`InboundPipeline` (`InboundPipeline.java:16-82`) orquesta un webhook entrante: es el flujo entrante de
+`docs/vision.md` §5, pasos 1 a 5, más los reportes de estado de los mensajes salientes. Vive en `channels` porque usa
+las piezas package-private del módulo (cuenta, directorio, registro, payload) y porque `messaging` no puede orquestar
+sin armar un ciclo (P-038, P-049). No tiene endpoint HTTP: lo expone, con su seguridad y la traducción de las
+excepciones, la tarea que abra el endpoint de webhooks (P-049).
+
+### Contrato de `receive`
+
+```java
+void receive(ChannelType channelType, WebhookPayload payload)
+```
+
+- **Entradas:** el tipo de canal (de la ruta del futuro endpoint) y el cuerpo del webhook tal como llegó. No valida sus
+  argumentos: un tipo nulo falla en el mapa del registro (`NullPointerException`), un `WebhookPayload` nulo falla en el
+  adaptador (`NullPointerException` de `payload.body()` en `SandboxChannelAdapter.parsed`, que no está entre las
+  excepciones que atrapa, `SandboxChannelAdapter.java:59`, `:62-63`; no es `InvalidWebhookPayloadException`) y el
+  contenido del payload lo valida el adaptador. Se llama **sin transacción ni sesión de JPA abiertas** y sin
+  organización activa: la organización sale de cada cuenta.
+- **Salida:** nada. Los efectos son los registros en la base (persona e identidad, oportunidad, mensaje, estado) y el
+  evento `MessageReceived` por cada mensaje nuevo.
+- **Excepciones que propaga** (no atrapa ninguna):
+
+| Excepción | Cuándo | Qué quedó escrito |
+|---|---|---|
+| `UnsupportedChannelException` | El tipo no tiene adaptador (`ChannelAdapterRegistry.adapterFor`) | Nada |
+| `InvalidWebhookPayloadException` | El adaptador rechaza el payload (todo o nada, P-048), aunque traiga partes válidas | Nada |
+| `IllegalStateException` de `resolve` | Se llamó dentro de una transacción o de un ámbito `SUPPORTS`, con al menos un mensaje o estado en el payload | Nada: `resolve` es el primer paso de cada mensaje y de cada estado. Sin test propio |
+| Cualquier error de `resolveOrCreate`, `recordActivity`, `recordReceived` o `applyStatus` (por ejemplo, `DataAccessException`) | Falla la base en un mensaje o estado | Los mensajes anteriores del payload y, del que falló, lo que ya confirmó (persona, actividad); ver «Carreras y falla parcial» |
+
+Ninguna de las dos excepciones del canal es pública ni se traduce a HTTP todavía (P-046, P-047, P-049).
+
+Ejemplo, con una cuenta `SANDBOX` de Acme registrada como `sandbox-acme` y el reloj en `2026-03-02T09:00:00Z`:
+
+```json
+{
+  "account": "sandbox-acme",
+  "messages": [
+    {"id": "in-1", "from": {"kind": "PHONE", "value": "+54 9 11 5555-0101"},
+     "text": "Hola, ¿tienen financiación?", "sentAt": "2026-03-02T08:59:20Z"}
+  ],
+  "statuses": [
+    {"messageId": "sandbox-out-1", "status": "READ"}
+  ]
+}
+```
+
+```
+pipeline.receive(SANDBOX, payload);
+
+person_identities: person_id = <Ana>, kind = PHONE, value = +5491155550101
+opportunities:     id = <op>, person_id = <Ana>, source = SANDBOX, status = OPEN,
+                   opened_at = last_activity_at = 2026-03-02T09:00:00Z
+messages:          id = <msg>, person_id = <Ana>, opportunity_id = <op>, channel_account_id = <cuenta>,
+                   channel = SANDBOX, sender_type = CUSTOMER, external_id = in-1, status = DELIVERED,
+                   occurred_at = 2026-03-02T08:59:20Z, recorded_at = 2026-03-02T09:00:00Z
+evento:            MessageReceived(<Acme>, <msg>, <Ana>, <op>, <cuenta>, SANDBOX)
+sandbox-out-1:     pasa a READ si es un mensaje de esa cuenta con un estado de rango menor;
+                   si no existe en esa cuenta, se ignora
+```
+
+| Entrada | Resultado |
+|---|---|
+| Mensaje de una identidad desconocida | Persona nueva con esa identidad normalizada, oportunidad `OPEN` con `source` = nombre del canal y `openedAt` = `lastActivityAt` = reloj, mensaje `CUSTOMER`/`DELIVERED` ligado a las dos, un `MessageReceived` |
+| El mismo payload otra vez (reenvío del proveedor), con el reloj más adelante | Nada nuevo: ni persona, ni actividad (`lastActivityAt` no cambia), ni mensaje, ni evento |
+| El mismo `id` dos veces en un payload | Un mensaje y un evento |
+| Persona conocida, mensaje nuevo | Misma persona y misma oportunidad, `lastActivityAt` adelantado al reloj, otro mensaje, otro evento |
+| Persona que vuelve pasada la ventana de reingreso (N + W) | La oportunidad anterior queda `CLOSED`/`NO_RESPONSE` en `L + N` (cierre al vuelo de `recordActivity`) y el mensaje cae en una oportunidad nueva |
+| Dos remitentes en un payload | Dos personas, dos oportunidades, cada mensaje y evento con lo suyo |
+| El mismo teléfono a cuentas de Acme y de Globex | Una persona por organización; cada mensaje y evento en la organización de la cuenta que lo recibió |
+| La misma persona a dos cuentas de la misma organización | Una persona y una oportunidad, dos mensajes, cada uno con su cuenta |
+| Mensaje o estado para una cuenta que no está registrada | WARN y descarte, sin excepción ni escritura en ninguna organización |
+| Payload con un teléfono inválido junto a uno válido | `InvalidWebhookPayloadException`; nada guardado, sin evento |
+| Payload con un NUL (U+0000) en el texto de un mensaje, o en el id de un estado, junto a partes válidas | `InvalidWebhookPayloadException`; nada guardado ni ningún estado cambiado, sin evento |
+| Estado `READ` y después `DELIVERED` del mismo saliente | Queda `READ` (`Message.advanceTo`, P-041); sin evento |
+| Estado de un `externalId` que no está en esa cuenta | Ignorado (`UNKNOWN_MESSAGE`), sin error; los demás estados del payload se aplican |
+
+### Parsear todo, después escribir
+
+`receive` (`InboundPipeline.java:43-54`):
+
+1. `adapters.adapterFor(channelType)` (`:44`).
+2. `adapter.parseInbound(payload)` y `adapter.parseStatusUpdates(payload)` (`:45-46`), **antes de la primera
+   escritura**. Con el sandbox, cada parseo arma las dos listas (P-048), así que un payload inválido falla en el
+   primero; pero el orden no depende de eso: un adaptador que validara cada lista por separado tampoco dejaría nada a
+   medio escribir.
+3. Los mensajes, en el orden del payload (`:47-49`): por cada uno, `inOrganizationOf(channelType,
+   externalAccountId, account -> accept(account, inbound))`, que resuelve la cuenta y, si existe, corre `accept` dentro
+   de `currentOrganization.runAs(account.organizationId(), ...)`.
+4. Después los estados, en el orden del payload (`:50-53`): por cada uno, `inOrganizationOf` con
+   `account -> timeline.applyStatus(account.id(), update.externalId(), update.status())`.
+   Van después de los mensajes porque un estado del mismo payload puede referirse a un mensaje recién guardado.
+
+Cada mensaje y cada estado resuelve su cuenta y abre su propio `runAs`, aunque el payload del sandbox traiga una sola
+cuenta: en el puerto, cada `InboundMessage` y cada `StatusUpdate` trae su propio `externalAccountId` (P-046).
+
+### Un mensaje (`accept`)
+
+Dentro del `runAs` de la organización de la cuenta (`InboundPipeline.java:69-81`), sin transacción propia:
+
+1. `timeline.isRecorded(account.id(), inbound.externalId())` (`:70-72`, transacción de solo lectura). Si ya está,
+   corta: un reenvío no crea persona, no cuenta como actividad y no publica evento.
+2. `people.resolveOrCreate(inbound.sender())` (`:73`, transacción 1, P-029).
+3. `opportunities.recordActivity(personId, account.channelType().name())` (`:74`, transacción 2, P-035). La fuente es
+   el nombre del canal de la cuenta (`"SANDBOX"`, después `"WHATSAPP"`); solo se usa si se abre una oportunidad nueva.
+4. `timeline.recordReceived(new ReceivedMessage(...))` (`:75-76`, transacción 3, P-042), con el canal tomado de la
+   cuenta (`account.channelType()`), que es lo que cumple la FK de tres columnas (P-045).
+5. Si `!recorded.duplicate()`, `events.publishEvent(new MessageReceived(...))` (`:77-80`), con el `organizationId` de
+   la cuenta (el accesor de la entidad, `.claude/rules/java.md`). Se publica fuera de toda transacción: la 3 ya
+   confirmó.
+
+Para un mensaje nuevo, `isRecorded` y `recordReceived` hacen la misma búsqueda por cuenta + `externalId`: se acepta esa
+consulta repetida, barata (índice único), a cambio de no contar un reenvío como actividad (P-050, `docs/mensajes.md`).
+
+Las tres transacciones están separadas porque `resolveOrCreate`, `recordActivity` y `recordReceived` rechazan una
+transacción abierta (en PostgreSQL una violación aborta la transacción en curso, y su reintento o relectura necesita
+una limpia), y porque `runAs` tiene que abrirse fuera de toda transacción (`docs/multi-tenant.md`).
+
+```mermaid
+sequenceDiagram
+    participant P as InboundPipeline
+    participant A as SandboxChannelAdapter
+    participant D as ChannelAccountDirectory
+    participant CO as CurrentOrganization
+    participant T as Timeline
+    participant PD as PersonDirectory
+    participant OT as OpportunityTracker
+    participant E as ApplicationEventPublisher
+    P->>A: parseInbound(payload) y parseStatusUpdates(payload)
+    Note over P,A: payload inválido: InvalidWebhookPayloadException, nada escrito
+    loop cada InboundMessage, en orden
+        P->>D: resolve(SANDBOX, externalAccountId)
+        alt cuenta desconocida
+            D-->>P: Optional.empty
+            Note over P: WARN y sigue con el próximo
+        else cuenta de Acme
+            D-->>P: cuenta
+            P->>CO: runAs(Acme, accept)
+            CO->>T: isRecorded(cuenta, externalId)
+            alt ya registrado
+                T-->>CO: true (corta: sin actividad ni evento)
+            else nuevo
+                CO->>PD: resolveOrCreate(sender) [tx 1]
+                CO->>OT: recordActivity(personId, "SANDBOX") [tx 2]
+                CO->>T: recordReceived(ReceivedMessage) [tx 3]
+                T-->>CO: RecordedMessage(id, duplicate)
+                opt duplicate = false
+                    CO->>E: publishEvent(MessageReceived)
+                end
+            end
+        end
+    end
+    loop cada StatusUpdate, en orden
+        P->>D: resolve(SANDBOX, externalAccountId)
+        P->>CO: runAs(organización, applyStatus)
+        CO->>T: applyStatus(cuenta, externalId, status)
+        Note over T: ADVANCED / UNCHANGED / UNKNOWN_MESSAGE, sin evento
+    end
+```
+
+### Estados de entrega
+
+Por cada `StatusUpdate`: `resolve` de la cuenta, `runAs` de su organización y `Timeline.applyStatus(account.id(),
+externalId, status)` (`InboundPipeline.java:50-53`), que es `@Transactional` y bloquea la fila del mensaje. El
+resultado (`ADVANCED`, `UNCHANGED` o `UNKNOWN_MESSAGE`) no se usa: un estado que no hace avanzar (llegó tarde, P-041) o
+de un mensaje que no está en esa cuenta se ignora sin error y sin log, y el pipeline sigue con el próximo. Los estados
+no publican evento (la notificación del cambio de estado es de #15, `docs/mensajes.md`).
+
+### Cuenta desconocida
+
+`inOrganizationOf` (`InboundPipeline.java:56-62`) llama a `resolve` y, si vuelve vacío, loguea un WARN (`:60-61`) en vez
+de abrir el `runAs` (`:59`), así que el mensaje o el estado se descarta sin excepción ni escritura: no hay organización
+a la que asignarlo (P-050), y el resto del payload se sigue procesando. El mismo WARN sirve para mensajes y estados:
+
+```
+Inbound SANDBOX notification for unknown channel account sandbox-desconocida was discarded
+```
+
+Lleva solo el tipo de canal y el id de nuestra cuenta, nunca el remitente ni el texto. El id viene del payload, que
+todavía no tiene firma verificada: antes de loguearlo, el privado `loggable` (`InboundPipeline.java:64-67`) lo trunca a
+64 caracteres (`MAX_LOGGED_ID_LENGTH`, `:20`) y reemplaza por `_` cada carácter que coincide con `CONTROL_CHARACTERS`
+(`[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]`, `:21`): los de control, ASCII y Unicode (CR, LF, TAB, U+0085 NEL); los de formato
+(U+200B espacio de ancho cero, U+200E marca de izquierda a derecha, U+202E inversión bidireccional, U+FEFF), y los
+separadores de línea (U+2028) y de párrafo (U+2029). Así un payload no puede falsear líneas del log, esconder o
+invertir texto en un visor, ni inflarlo. Por ejemplo, `"cuenta\r\nWARN falso"` se loguea como `cuenta__WARN falso`, y
+`"cuenta\u202Eosla"` como `cuenta_osla`. Primero trunca y después reemplaza, así que el resultado nunca pasa de 64. Un
+NUL no llega hasta acá: con al menos un mensaje o estado, lo rechaza el parseo.
+
+### Carreras y falla parcial
+
+- **Dos copias del mismo webhook en paralelo**: las dos pueden pasar `isRecorded`. La persona converge en una
+  (P-029); `recordActivity` serializa las dos actividades sobre la misma oportunidad (P-035), así que solo
+  `lastActivityAt` puede quedar en el mayor de dos instantes casi iguales, lo que es inofensivo; `recordReceived`
+  inserta un solo mensaje y la otra copia recibe `duplicate = true`. Resultado: un mensaje y un evento (P-050). Lo
+  prueba `copyOfTheWebhookRecordedConcurrentlyElsewherePublishesNoEvent`, con la copia rival insertada por SQL sin
+  confirmar.
+- **Falla dentro de un mensaje**: si falla la transacción 2 o la 3, lo anterior queda confirmado (la persona; con la 3,
+  también la actividad, sin mensaje). El reintento del proveedor la encuentra y vuelve a registrar actividad, que
+  adelanta otra vez `lastActivityAt` (`docs/oportunidades.md`, «Riesgos»).
+- **Falla a mitad de un payload**: la excepción corta el procesamiento; los mensajes anteriores ya están confirmados, y
+  los siguientes y todos los estados del payload no se procesan. En el reintento, `isRecorded` saltea los confirmados.
+  Un NUL (U+0000) en un texto o un id ya no provoca este caso (PostgreSQL lo rechazaba al escribir): lo rechaza el
+  parseo, antes de escribir nada (ver «Parseo y payloads inválidos»).
+
+### Evento `MessageReceived`
+
+```java
+public record MessageReceived(UUID organizationId, UUID messageId, UUID personId, UUID opportunityId,
+        UUID channelAccountId, ChannelType channel) {}
+```
+
+- Lo publica `InboundPipeline` con el `ApplicationEventPublisher` de Spring, **solo si el mensaje no era un duplicado**
+  (`InboundPipeline.java:77-80`), dentro del `runAs` pero **fuera de toda transacción**. Un reenvío o una copia que
+  perdió la carrera no publica nada.
+- Es de `channels` (no de `messaging`, que no orquesta, P-038) y es público para que otros módulos lo escuchen. Lleva
+  solo ids y el canal: ni el texto ni la identidad del remitente. No dice si la oportunidad es nueva: eso lo resuelve
+  #13 (P-051).
+- **Entrega como mucho una vez.** No hay registro de publicaciones (`event_publication`; sin
+  `spring-modulith-starter-jpa`, P-009 sigue vigente): si el proceso cae entre la transacción 3 y la publicación, o si
+  un listener falla, el evento se pierde, y el reintento del webhook no lo vuelve a publicar porque `isRecorded` corta.
+  Lo que necesite garantía (el reparto de #13, el temporizador de #14) va a colgar de un evento de `opportunities`
+  publicado dentro de su transacción, y entonces se suma el starter con su migración (P-051).
+- **Listeners**: la convención única es `@Async @TransactionalEventListener(fallbackExecution = true)`, sin
+  `@Transactional`, con `runAs(event.organizationId(), ...)` (`.claude/rules/java.md`, `docs/multi-tenant.md`). Como
+  `MessageReceived` se publica sin transacción, corre en el momento (por `fallbackExecution`) y en otro hilo (por
+  `@Async`). Fuera de los tests todavía no hay listeners, ni `@EnableAsync`. Un `@EventListener` síncrono, como el
+  colector de los tests, corre en el hilo del webhook dentro del `runAs`, y una excepción suya cortaría el resto del
+  payload.
 
 ## Esquema
 
@@ -526,8 +789,8 @@ Un segundo `INSERT` con el mismo `channel_type` y `external_account_id` falla po
 `channel_accounts_channel_type_external_account_id_key`, aunque sea para otra organización.
 
 Una cuenta del canal de prueba es igual, con `channel_type = 'SANDBOX'` y como `external_account_id` el mismo valor
-que van a traer los payloads en `account` (por ejemplo, `'sandbox-acme'`). Mientras no haya endpoint de webhooks
-(#10), no hay forma de mandarle un payload a la app corriendo.
+que van a traer los payloads en `account` (por ejemplo, `'sandbox-acme'`). Mientras ninguna tarea exponga un endpoint
+de webhooks (#10 no lo hace, P-049), no hay forma de mandarle un payload a la app corriendo.
 
 ## Tests
 
@@ -576,8 +839,8 @@ base). Usa el `SandboxChannelAdapter` real y un adaptador de mentira declarado e
 
 `backend/src/test/java/com/communicatorone/channels/SandboxChannelAdapterTest.java` (#43, unitario, sin Spring ni
 base). Los payloads van en text blocks del propio test (formato propio, P-048), no en `src/test/resources`. `send`
-usa `ChannelAccount.register(SANDBOX, "sandbox-acme", "Pruebas", true)` sin persistir. 8 métodos, 59 ejecuciones
-(el parametrizado corre 26 payloads en los dos métodos de parseo).
+usa `ChannelAccount.register(SANDBOX, "sandbox-acme", "Pruebas", true)` sin persistir. 8 métodos, 71 ejecuciones
+(el parametrizado corre 32 payloads en los dos métodos de parseo).
 
 | Test | Qué cubre |
 |---|---|
@@ -586,23 +849,72 @@ usa `ChannelAccount.register(SANDBOX, "sandbox-acme", "Pruebas", true)` sin pers
 | `sandboxPayloadBecomesStatusUpdatesOfItsAccountInTheOrderTheyArrived` | Tres estados, con `READ` antes que `DELIVERED` para el mismo mensaje: salen tal cual y en el orden del payload (el parser no reordena ni deduplica). |
 | `payloadWithOnlyStatusesHasNoInboundMessages` | Sin `messages`: `parseInbound` da vacío y `parseStatusUpdates`, el estado. |
 | `payloadWithOnlyMessagesHasNoStatusUpdates` | Sin `statuses`: `parseStatusUpdates` da vacío y `parseInbound`, el mensaje. |
-| `malformedSandboxPayloadIsRejected` | Parametrizado, cada caso en `parseInbound` y en `parseStatusUpdates`: no JSON, vacío, `null`, sin `account` o en blanco, clave `messages` mal escrita, mensaje con un campo desconocido, `sentAt` numérico, mensaje sin `id`, `from`, `text` o `sentAt`, remitente sin `value`, texto vacío, `kind` desconocido o numérico, teléfono y email inválidos, fecha mal formada, mensaje `null`, estado sin `messageId` o sin `status`, `status` desconocido, numérico o como texto numérico, y estado `null`. Afirma `InvalidWebhookPayloadException`, el mensaje exacto y que no tiene causa. |
+| `malformedSandboxPayloadIsRejected` | Parametrizado, cada caso en `parseInbound` y en `parseStatusUpdates`: no JSON, vacío, `null`, sin `account` o en blanco, clave `messages` mal escrita, mensaje con un campo desconocido, `sentAt` numérico, mensaje sin `id`, `from`, `text` o `sentAt`, remitente sin `value`, texto vacío, `kind` desconocido o numérico, teléfono y email inválidos, fecha mal formada, mensaje `null`, estado sin `messageId` o sin `status`, `status` desconocido, numérico o como texto numérico, estado `null`, y un NUL (`\u0000`) en cada campo que lo rechaza: la cuenta de un mensaje, el id de un mensaje, el valor de un remitente `TELEGRAM_USER` (un usuario solo se recorta, así que el NUL llega a `InboundMessage`), el texto, la cuenta de un estado y el `messageId` de un estado. Afirma `InvalidWebhookPayloadException`, el mensaje exacto y que no tiene causa. |
 | `sendingRecordsTheTextForItsRecipient` | `send` devuelve un id `sandbox-…`; `hasSentTextTo` da `true` para ese destinatario y texto, y `false` con otro texto o con otro destinatario. |
 | `eachSendGetsItsOwnExternalId` | Dos envíos iguales a un email tienen ids distintos. |
 
-Sin test en #43: el registro armado por Spring con los beans reales (lo cubre el primer test de integración de #10) y
-los comportamientos de Jackson marcados «sin test propio» en «Formato del payload del sandbox», y el `sentAt` con
-desfase horario, con epoch como texto o con espacios alrededor.
+Sin test en #43: los comportamientos de Jackson marcados «sin test propio» en «Formato del payload del sandbox», y el
+`sentAt` con desfase horario, con epoch como texto o con espacios alrededor. El registro armado por Spring con los
+beans reales lo cubre desde #10 `InboundPipelineTest`, que usa el `InboundPipeline` del contexto.
+
+`backend/src/test/java/com/communicatorone/channels/InboundPipelineTest.java` (#10). `@SpringBootTest` con
+`RANDOM_PORT`, para compartir el contexto de Spring con los demás tests de `channels` (`ChannelAccountDirectoryTest`
+usa lo mismo), + `@Import(TestcontainersConfiguration.class)` + `@TestConstructor(ALL)`, sin `@Transactional`. Corre
+el pipeline real del contexto (registro con el `SandboxChannelAdapter`, directorio, `PersonDirectory`,
+`OpportunityTracker`, `Timeline`) con payloads del sandbox; el único fake es el reloj (`MutableClock`, fijado en
+`@BeforeEach`). Piezas de apoyo:
+
+- `ChannelsFixture.sandboxAccount(organizationId)`: registra una cuenta `SANDBOX` con id externo al azar y devuelve
+  `SandboxAccount(id, organizationId, externalAccountId)`.
+- `InboundPipelineFixture`: arma los payloads (`messagesTo`, `statusesTo`, text block con el formato de P-048), siembra
+  una conversación (`conversationWith`, con `resolveOrCreate` + `recordActivity`) y un saliente (`operatorReplied`, con
+  `Timeline.recordSent`), y consulta la base con `JdbcTemplate` filtrando por organización (`identitiesOf`,
+  `opportunitiesOf`, `messagesOf`) o en todas (`identitiesInAnyOrganizationWithValue`,
+  `messagesInAnyOrganizationWithExternalId`). Para la carrera, `rivalStartsRecordingMessage` inserta por SQL un mensaje
+  sin confirmar y `anotherSessionIsWaitingToWriteMessages` mira `pg_stat_activity`. Las filas se comparan enteras con
+  los records `StoredIdentity`, `StoredOpportunity` y `StoredMessage`, y el evento esperado sale de la fila guardada
+  con `StoredMessage.event(organizationId)`.
+- `ReceivedMessages`: `@Component` de `src/test` con un `@EventListener` síncrono que junta los `MessageReceived` en
+  una `ConcurrentLinkedQueue`; se vacía en `@BeforeEach` y se consulta por organización (`in`) o entera (`all`). No se
+  usa `@RecordApplicationEvents` porque está ligado al hilo del test, y la carrera publica desde otro.
+
+16 métodos, 16 ejecuciones.
+
+| Test | Qué cubre |
+|---|---|
+| `messageFromUnknownIdentityCreatesPersonWithOpenOpportunityAndRecordsTheMessage` | Punta a punta con el teléfono escrito con espacios: una identidad `PHONE` en E.164; oportunidad `OPEN` con `source = SANDBOX` y `openedAt` = `lastActivityAt` = reloj; mensaje `CUSTOMER`/`DELIVERED` en el canal y la cuenta, con `externalId`, texto, `occurredAt` = `sentAt` y `recordedAt` = reloj, ligado a la persona y la oportunidad; exactamente un `MessageReceived` con esos ids. |
+| `duplicatedWebhookDoesNotDuplicateMessageNorCountAsActivity` | El mismo payload dos veces, con el reloj 5 minutos adelante: una identidad, una oportunidad con `lastActivityAt` del primer instante, un mensaje, un evento. |
+| `repeatedMessageInsideOneWebhookIsRecordedOnce` | El mismo `id` dos veces en un payload: una identidad, una oportunidad, un mensaje, un evento. |
+| `knownPersonWritingAgainAddsTheMessageToHerOpenOpportunity` | Segundo webhook 2 horas después, con otro `id`: una persona, una oportunidad con `lastActivityAt` adelantado, dos mensajes en ella, dos eventos. |
+| `personReturningAfterReentryWindowGetsNewOpportunityWithTheMessage` | Con los defaults (N = 7, W = 3 días), vuelve en `NOW + N + W`: la anterior `CLOSED`/`NO_RESPONSE` en `NOW + N`, una nueva `OPEN` con el segundo mensaje; cada evento con su oportunidad. |
+| `webhookWithMessagesFromTwoPeopleRecordsEachOnItsOwnTimeline` | Dos remitentes en un payload: dos personas, dos oportunidades, cada mensaje y evento con su persona y oportunidad, en el orden del payload. |
+| `messageIsRecordedInTheOrganizationOfTheAccountThatReceivedIt` | El mismo teléfono a una cuenta de Acme y a una de Globex: una persona distinta por organización, cada mensaje, oportunidad y evento en la suya, nada cruzado. |
+| `samePersonWritingToTwoAccountsOfTheOrganizationKeepsOneOpportunity` | Dos cuentas `SANDBOX` de Acme: una persona, una oportunidad con `lastActivityAt` adelantado, dos mensajes con su cuenta cada uno, dos eventos. |
+| `messageForUnknownChannelAccountIsDiscardedWithoutTouchingAnyOrganization` | Cuenta no registrada: sin excepción; ninguna identidad con ese teléfono ni mensaje con ese `externalId` en ninguna organización; Acme sin identidades ni oportunidades; ningún evento. |
+| `invalidWebhookPayloadIsRejectedWithoutRecordingAnything` | Un teléfono sin `+` junto a uno válido: `InvalidWebhookPayloadException`; Acme sin identidades, oportunidades ni mensajes; ningún evento. |
+| `webhookWithNulCharacterInAMessageIsRejectedWithoutRecordingAnything` | Un mensaje válido de Ana seguido de uno de Juan con `hola\u0000`: `InvalidWebhookPayloadException`; Acme sin identidades, oportunidades ni mensajes (tampoco los de Ana, que va primero); ningún evento. |
+| `webhookWithNulCharacterInAStatusIsRejectedWithoutChangingAnyStatus` | Un saliente con un `DELIVERED` válido seguido de un `READ` con el `externalId` terminado en `\u0000`: `InvalidWebhookPayloadException`; el saliente queda igual que antes (tampoco aplica el `DELIVERED`); ningún evento. |
+| `copyOfTheWebhookRecordedConcurrentlyElsewherePublishesNoEvent` | La persona ya tiene conversación; un rival inserta el mismo `externalId` sin confirmar; el pipeline corre en otro hilo y se espera a que quede bloqueado en el `INSERT`; el rival confirma. Una identidad, la misma oportunidad, un solo mensaje (el del rival) y ningún evento. |
+| `deliveryReportArrivingAfterTheReadReportDoesNotMoveTheStatusBack` | Un saliente recibe `READ` en un webhook y `DELIVERED` en otro: queda `READ`; ningún evento. |
+| `statusForUnknownMessageIsIgnoredWithoutFailingTheWebhook` | Un estado de un `externalId` que no existe, seguido de uno válido: sin excepción, el saliente pasa a `DELIVERED`; ningún evento. |
+| `statusForUnknownChannelAccountIsDiscarded` | Un estado a una cuenta no registrada con el `externalId` de un saliente real: sin excepción, el saliente sigue `SENT` sin cambios; ningún evento. |
+
+Sin test en #10: el canal sin adaptador (lo cubre `ChannelAdapterRegistryTest.channelTypeWithoutAdapterIsRejected`; un
+test con `WHATSAPP` se rompería con #11), la llamada dentro de una transacción (la frena `resolve`, probado en
+`ChannelAccountDirectoryTest`), una falla de la base a mitad de un payload, y el texto y el saneamiento del WARN de
+cuenta desconocida. El NUL se prueba de punta a punta solo en el texto de un mensaje y en el id de un estado; los seis
+campos que lo rechazan tienen su caso en `SandboxChannelAdapterTest.malformedSandboxPayloadIsRejected`.
 
 `TenantIsolationTest.everyBusinessEntityBelongsToAnOrganization` cubre que `ChannelAccount` lleve `@TenantId`, y
-`ModularStructureTest` que `channels` no use internos de `messaging`, `organizations` ni `people`.
+`ModularStructureTest` que `channels` no use internos de `messaging`, `organizations`, `people` ni `opportunities`.
 
 El caso de una sesión de JPA ligada al hilo sin sincronización de transacción (OSIV) no tiene test en
 `ChannelAccountDirectoryTest`: lo frena `callAs`, probado en
 `TenantIsolationTest.organizationCannotBeSwitchedWhileASessionIsOpen`.
 
 Comando: `./mvnw test -Dtest='ChannelAccount*Test,TimelineTest'` desde `backend/` (skill `run-tests`); los de #43, sin
-Docker: `./mvnw test -Dtest='ChannelAdapterRegistryTest,SandboxChannelAdapterTest'`.
+Docker: `./mvnw test -Dtest='ChannelAdapterRegistryTest,SandboxChannelAdapterTest'`; el de #10, con Docker:
+`./mvnw test -Dtest=InboundPipelineTest`.
 
 ## Riesgos y pendientes
 
@@ -614,35 +926,51 @@ Docker: `./mvnw test -Dtest='ChannelAdapterRegistryTest,SandboxChannelAdapterTes
   tiene que ser un estado (activa/inactiva), no un `DELETE` (#11).
 - **Visibilidad: resuelta con paquete plano.** #43 dejó el puerto, el registro y el sandbox en la raíz de
   `channels`, todo package-private (P-046), así que `ChannelAccount` y `ChannelAccountDirectory` siguen sin ser
-  `public`. Los próximos adaptadores van en la misma raíz con prefijo (`WhatsAppChannelAdapter`). Si #10 termina en un
-  módulo por encima de `channels`, hace falta un record público en vez de exponer la entidad.
+  `public`. Los próximos adaptadores van en la misma raíz con prefijo (`WhatsAppChannelAdapter`). #10 quedó en el
+  mismo módulo (P-049), así que tampoco hizo falta un record público de la cuenta; lo único público es el evento
+  `MessageReceived`.
 - **Sin control de valores en la base**: un `INSERT` por SQL con un `channel_type` que no existe en el enum rompe la
   carga de la entidad, y uno con espacios en el id no se resuelve.
 - **La V7 valida las filas existentes de `messages`** al agregar la FK: una base local con mensajes insertados a mano
   (con cuentas al azar, como en #8) hace fallar la migración. Se recrea con `docker compose down -v && docker compose
   up -d`. El `ALTER TABLE messages` toma `SHARE ROW EXCLUSIVE` sin `lock_timeout`; riesgo bajo mientras no haya
   producción (la misma mitigación que en `docs/mensajes.md`, «Riesgos»).
-- **Webhooks repetidos y desordenados.** El sandbox entrega el mismo `externalId` al reparsear y no reordena los
-  estados (lo fijan sus tests), pero el escenario completo (el mismo webhook dos veces, estados fuera de orden) se
-  prueba en `TimelineTest` (`duplicatedWebhookDoesNotDuplicateMessage`,
-  `deliveryReportArrivingAfterTheReadReportDoesNotMoveTheStatusBack`, entre otros) y se va a probar de punta a punta
-  en #10. Un `id` repetido dentro del mismo payload tampoco se rechaza en el parser: lo deduplica `Timeline`.
+- **Webhooks repetidos y desordenados: resuelto en #10.** El mismo webhook dos veces, un `id` repetido en un payload
+  y un `DELIVERED` después de un `READ` se prueban de punta a punta en `InboundPipelineTest`. El parser sigue sin
+  rechazar un `id` repetido: lo deduplica `Timeline`.
 - **Datos personales en memoria sin tope.** `SandboxChannelAdapter` es un bean siempre activo y guarda cada envío
   (identidad y texto) en una cola que nunca se vacía. Hoy no pasa nada porque nadie le envía fuera de los tests, pero
   con una cuenta `SANDBOX` cargada en un servidor de larga vida, los envíos a esa cuenta se acumulan en memoria. El
-  freno (perfil, propiedad o bean solo de test) lo decide #10 al abrir el endpoint de webhooks (P-048).
+  freno (perfil, propiedad o bean solo de test) lo decide la tarea que exponga un endpoint para `SANDBOX` (P-048,
+  ajustada en #10).
 - **Excepciones package-private.** `InvalidWebhookPayloadException` y `UnsupportedChannelException` no son públicas y
-  no se traducen a HTTP. Si #10 las traduce en `ApiExceptionHandler` (paquete raíz), las tiene que hacer públicas en la
-  raíz de `channels` (P-046, P-047).
-- **El registro armado por Spring no tiene test en #43**: solo se prueba construyéndolo a mano. Que el contexto lo
-  arme con los beans reales (hoy solo el sandbox) lo cubre el primer test de integración de #10.
+  no se traducen a HTTP, y `InboundPipeline.receive` las propaga. La tarea que exponga el endpoint de webhooks decide
+  qué responde al proveedor y, si las traduce en `ApiExceptionHandler` (paquete raíz), las hace públicas en la raíz de
+  `channels` (P-046, P-047, P-049).
+- **El pipeline no tiene endpoint** (P-049): hoy nadie fuera de los tests puede mandarle un webhook. La ruta, su
+  seguridad (pública y con firma del proveedor, `.claude/rules/java.md`) y la respuesta ante payload inválido o canal
+  sin adaptador quedan para la tarea que lo exponga.
+- **`MessageReceived` se entrega como mucho una vez** (P-051): sin registro de publicaciones, una caída entre el
+  guardado del mensaje y la publicación, o un listener que falla, pierden el evento, y el reenvío del webhook no lo
+  repite. Sirve para notificar (WebSocket, #15); lo que necesite garantía cuelga de un evento de `opportunities`.
+- **Sin `@EnableAsync`**: hasta que la tarea del primer listener la agregue, `@Async` no tiene efecto y un listener de
+  `MessageReceived` correría en el hilo del webhook, donde una excepción suya cortaría el resto del payload (ver
+  «Evento `MessageReceived`»).
+- **Falla parcial de un payload**: una falla de la base a mitad de un payload deja confirmados los mensajes anteriores
+  y no procesa los siguientes ni los estados; el reintento del proveedor saltea los confirmados. Un mensaje que falla
+  entre `recordActivity` y `recordReceived` deja la actividad sin mensaje (`docs/oportunidades.md`). El caso del NUL
+  (U+0000), que PostgreSQL rechaza en `TEXT` y antes fallaba a mitad de camino, quedó cerrado en #10: lo rechaza el
+  parseo, todo o nada.
 - **`WebhookPayload` es solo el cuerpo como texto**, sin headers ni bytes crudos. La firma `X-Hub-Signature-256` de
   Meta se calcula sobre los bytes exactos del cuerpo: #11 reevalúa si suma headers o `byte[]` (P-046).
-- **#10 (pipeline entrante)**: llama a `resolve` fuera de transacción, decide qué hacer con un webhook de una cuenta
-  desconocida y abre `runAs(account.organizationId(), ...)` pasando `account.channelType()` como canal.
-- **#10 (pipeline entrante)**, por #43: usa `ChannelAdapterRegistry.adapterFor` y los dos métodos de parseo, decide
-  qué responde ante `InvalidWebhookPayloadException` y `UnsupportedChannelException`, y el freno del sandbox.
+- **#10 (pipeline entrante): hecho.** Llama a `resolve` fuera de transacción, descarta con WARN la cuenta
+  desconocida, abre `runAs(account.organizationId(), ...)` pasando `account.channelType()` como canal, usa el registro
+  y los dos métodos de parseo, y aplica los estados (ver «Pipeline de entrada (#10)»).
 - **#11**: credenciales, URL o secreto del webhook, «tiene bot», alta, baja (como estado) y listado de cuentas; el
-  adaptador de WhatsApp (`WhatsAppChannelAdapter`, con payloads de Meta en `src/test/resources`) y la firma.
+  adaptador de WhatsApp (`WhatsAppChannelAdapter`, con payloads de Meta en `src/test/resources`) y la firma; el nombre
+  visible de la persona que traiga el proveedor (`profile.name`, P-030 ajustada en #10).
 - **#12**: el envío lee `allowsOutbound`, que hoy solo leen los tests; modela las fallas de envío y suma al puerto
-  `windowState` y `startConversation` (`docs/vision.md` §5).
+  `windowState` y `startConversation` (`docs/vision.md` §5). Además: `Timeline.applyStatus` no distingue la dirección
+  del mensaje, así que un estado con el `externalId` de un **entrante** de esa cuenta lo haría avanzar (por ejemplo, de
+  `DELIVERED` a `READ`). Con los proveedores reales los ids de entrantes y salientes no chocan, y el sandbox no tiene
+  endpoint; #12 decide si `applyStatus` se limita a los salientes.

@@ -26,23 +26,26 @@ El módulo `messaging` expone un único servicio, `Timeline`, con cuatro operaci
 
 Registrar es **idempotente por cuenta de canal + `externalId`**: los proveedores reenvían webhooks, y el mismo mensaje
 registrado dos veces (también en paralelo) da una sola fila. La respuesta, `RecordedMessage(id, duplicate)`, dice si el
-mensaje ya estaba; eso es lo que #10 usa para publicar el evento «mensaje recibido» una sola vez.
+mensaje ya estaba; eso es lo que `InboundPipeline` (#10) usa para publicar el evento `MessageReceived` una sola vez.
 
-Se va a activar desde el flujo entrante (#10), con cada webhook de mensaje; desde el flujo saliente (#12), al enviar; y
-con cada webhook de estado. Hoy nadie la llama fuera de los tests.
+Desde #10, el pipeline entrante (`InboundPipeline`, `docs/canales.md`) llama a `isRecorded` y `recordReceived` con
+cada mensaje de un webhook, y a `applyStatus` con cada reporte de estado; `recordSent` lo va a llamar el flujo
+saliente (#12). Como el pipeline todavía no tiene endpoint (P-049), hoy solo se ejercita desde los tests.
 
 Fuera de #8: la tabla `channel_accounts` y su FK desde `messages` (#42, `docs/canales.md`), el puerto de canal y el
-adaptador `SANDBOX` (#43, `docs/canales.md`), el pipeline entrante y la llamada a `recordActivity` (#10), adjuntos,
-plantillas y ubicación (#11, #12), la ventana de conversación y el envío (#12), la consulta de la línea de tiempo,
-REST, WebSocket y los no leídos del operador (#15), y los eventos (P-009).
+adaptador `SANDBOX` (#43, `docs/canales.md`), el pipeline entrante y la llamada a `recordActivity` (#10, hecho en
+`docs/canales.md`), adjuntos, plantillas y ubicación (#11, #12), la ventana de conversación y el envío (#12), la
+consulta de la línea de tiempo, REST, WebSocket y los no leídos del operador (#15), y los eventos (P-009; desde #10
+existe `MessageReceived`, que publica el pipeline entrante en `channels`, P-051).
 
 ## Piezas
 
 Módulo `messaging` (`backend/src/main/java/com/communicatorone/messaging/`). No depende de ningún otro módulo: la
 persona, la oportunidad y la cuenta de canal llegan como `UUID` (P-019), y la base controla que sean coherentes con FK
 compuestas; la organización la asigna y filtra Hibernate con `@TenantId` (P-018). Es un módulo base: `channels`
-depende de él (desde #42, por `ChannelType`), y la orquestación de entrada (#10) y de salida (#12) vive en
-`channels` o en un módulo por encima, nunca en `messaging`, porque eso armaría un ciclo (P-038).
+depende de él (desde #42, por `ChannelType`; desde #10, por `Timeline` y `ReceivedMessage`), y la orquestación de
+entrada (`InboundPipeline`, en `channels` desde #10, P-049) y de salida (#12) vive en `channels` o en un módulo por
+encima, nunca en `messaging`, porque eso armaría un ciclo (P-038).
 
 | Clase | Visibilidad | Qué hace |
 |---|---|---|
@@ -121,7 +124,7 @@ Quien llama a `recordReceived` o `recordSent`:
    PostgreSQL una violación aborta la transacción en curso, y la relectura del duplicado necesita una transacción
    limpia.
 2. **Tiene organización activa**: `currentOrganization.callAs(organizationId, ...)` o un request con operador
-   autenticado. #10 tiene que ligar la organización (resuelta desde la cuenta de canal con
+   autenticado. `InboundPipeline` (#10) liga la organización (resuelta desde la cuenta de canal con
    `ChannelAccountDirectory.resolve`, `docs/canales.md`) **antes** de llamar. Sin organización, el resolver devuelve el
    centinela `UUID(0, 0)` (`OrganizationTenantResolver.java:13`, `:23`): registrar falla por la FK de
    `organization_id` y `applyStatus` devuelve `UNKNOWN_MESSAGE`, porque la búsqueda filtra por el centinela.
@@ -140,25 +143,30 @@ y el lock de la fila dura hasta que esa transacción termine. `isRecorded` es `@
 transacción de solo lectura termina antes de volver, así que no le deja una abierta al `recordReceived` que sigue; si
 el llamador ya tiene una transacción, se une a ella.
 
-Flujo entrante (#10), en tres transacciones de escritura (persona, oportunidad, mensaje), más la de solo lectura de
-`isRecorded`:
+Flujo entrante, como quedó en `InboundPipeline.accept` (#10, `InboundPipeline.java:69-81`; detalle en
+`docs/canales.md`): dentro del `runAs` de la organización de la cuenta, primero la transacción de solo lectura de
+`isRecorded` y después tres de escritura (persona, oportunidad, mensaje):
 
 ```java
-currentOrganization.callAs(organizationId, () -> {
-    var personId = personDirectory.resolveOrCreate(identity);                     // tx 1
-    if (timeline.isRecorded(channelAccountId, externalId)) {                      // solo lectura
-        return null;                                                              // reenvío: no cuenta como actividad
-    }
-    var opportunityId = opportunityTracker.recordActivity(personId, source);      // tx 2
-    var recorded = timeline.recordReceived(new ReceivedMessage(personId, opportunityId, channelAccountId,
-            channel, externalId, content, occurredAt));                           // tx 3
-    // #10 publica «mensaje recibido» solo si !recorded.duplicate()
-    return recorded;
-});
+if (timeline.isRecorded(account.id(), inbound.externalId())) {                    // solo lectura
+    return;                                                       // reenvío: sin persona, actividad ni evento
+}
+var personId = people.resolveOrCreate(inbound.sender());                          // tx 1
+var opportunityId = opportunities.recordActivity(personId, account.channelType().name());   // tx 2
+var recorded = timeline.recordReceived(new ReceivedMessage(personId, opportunityId, account.id(),
+        account.channelType(), inbound.externalId(), inbound.content(), inbound.occurredAt()));   // tx 3
+if (!recorded.duplicate()) {
+    events.publishEvent(new MessageReceived(...));                                // fuera de transacción
+}
 ```
 
 `isRecorded` no es autoritativo: dos copias del mismo webhook en paralelo pueden pasar las dos el chequeo y llamar las
-dos a `recordActivity`. Lo autoritativo es `RecordedMessage.duplicate`: una sola de las dos recibe `false`.
+dos a `recordActivity`. Lo autoritativo es `RecordedMessage.duplicate`: una sola de las dos recibe `false`, y solo esa
+publica `MessageReceived` (P-050, P-051).
+
+Los reportes de estado del mismo webhook se aplican después de los mensajes, cada uno con su `runAs` y
+`applyStatus(account.id(), externalId, status)`; el resultado no se usa: `UNCHANGED` y `UNKNOWN_MESSAGE` se ignoran
+sin error ni evento.
 
 ## Reglas
 
@@ -547,14 +555,14 @@ Comando: `./mvnw test -Dtest='MessageTest,TimelineTest'` desde `backend/` (skill
 - **Fixtures de test duplicados**: `MessagingFixture` es la tercera copia de `organization(name)` y del patrón «rival
   que escribe sin confirmar» (`PeopleFixture`, `OpportunitiesFixture`). A futuro, un helper de test compartido.
 - Los tests de las carreras dependen de `pg_stat_activity` (PostgreSQL).
-- **Dos `SELECT` iguales para un mensaje nuevo en el flujo de #10**: el flujo previsto («API y contrato») llama a
-  `isRecorded` y después a `recordReceived`, que vuelve a buscar por cuenta + `externalId` antes de insertar
+- **Dos `SELECT` iguales para un mensaje nuevo en el flujo de #10 (aceptado en #10, P-050)**: `InboundPipeline`
+  llama a `isRecorded` y después a `recordReceived`, que vuelve a buscar por cuenta + `externalId` antes de insertar
   (`Timeline.java:50`, `:64-65`). Para un mensaje nuevo, el caso común, son dos consultas idénticas por el `UNIQUE`.
-  #10 puede decidir por `RecordedMessage.duplicate` (registrar primero y contar la actividad solo si es `false`, lo que
-  obliga a resolver la oportunidad de otra forma, porque `ReceivedMessage` la necesita) o aceptar la consulta extra,
-  que es barata (búsqueda por índice único).
+  Se acepta la consulta extra, barata (búsqueda por índice único), porque apoyarse solo en
+  `RecordedMessage.duplicate` obligaría a registrar el mensaje antes de tener la oportunidad que `ReceivedMessage`
+  necesita.
 
-## Pendiente: #10, #12, #15
+## Pendiente: #12, #15
 
 - **#9 (canales y cuentas)**: hecho en #42 (`docs/canales.md`), con la rama apilada sobre la de #8: V7 crea
   `channel_accounts` y la FK de tres columnas `(channel_account_id, organization_id, channel)` de `messages`, que
@@ -563,14 +571,11 @@ Comando: `./mvnw test -Dtest='MessageTest,TimelineTest'` desde `backend/` (skill
 - **#43 (puerto y sandbox)**: hecho (`docs/canales.md`). `SANDBOX` está en `ChannelType`; el puerto
   `ChannelAdapter` exige un `externalId` único por cuenta y estable entre reenvíos (P-042), y el sandbox lo toma del
   `id` de cada mensaje del payload. Para Telegram, componerlo (`chatId:messageId`) queda para su adaptador.
-- **#10**: resolver la cuenta con `ChannelAccountDirectory.resolve` y ligar su organización con
-  `currentOrganization.runAs(account.organizationId(), ...)` **antes** de llamar a `Timeline`, pasando
-  `account.channelType()` como canal. Sin organización, registrar falla por `messages_organization_id_fkey` y
-  `applyStatus` devuelve `UNKNOWN_MESSAGE` en silencio.
-- **#10 (flujo entrante)**: vive en `channels` (o en un módulo por encima), no en `messaging`. Descarta el reenvío con
-  `isRecorded` antes de `recordActivity`, registra con `recordReceived` y publica «mensaje recibido» solo si
-  `RecordedMessage.duplicate` es `false`. Decide si acepta el `SELECT` repetido de un mensaje nuevo o se apoya solo en
-  `RecordedMessage.duplicate` (ver «Riesgos»).
+- **#10 (flujo entrante)**: hecho (`InboundPipeline`, `docs/canales.md`). Vive en `channels`; resuelve la cuenta con
+  `ChannelAccountDirectory.resolve` y liga su organización con `runAs` antes de llamar a `Timeline`, pasando
+  `account.channelType()` como canal; descarta el reenvío con `isRecorded` antes de `recordActivity`, registra con
+  `recordReceived` y publica `MessageReceived` solo si `RecordedMessage.duplicate` es `false`; acepta el `SELECT`
+  repetido de un mensaje nuevo (ver «Riesgos»), y aplica los reportes de estado con `applyStatus`.
 - **#12 (envío y ventana)**: vive fuera de `messaging`. Decide el registro antes del envío (riesgo de estados que llegan
   antes), la oportunidad del saliente proactivo, y escribe la consulta de la ventana sobre el índice parcial.
 - **#15 (vista unificada)**: la consulta de la línea de tiempo, REST, WebSocket y los no leídos del operador (otro

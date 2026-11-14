@@ -35,6 +35,12 @@ class ChannelsFixture {
         return new RegisteredAccount(id, organizationId, channelType, allowsOutbound);
     }
 
+    SandboxAccount sandboxAccount(UUID organizationId) {
+        var externalAccountId = externalAccountId("sandbox");
+        var account = account(organizationId, ChannelType.SANDBOX, externalAccountId, true);
+        return new SandboxAccount(account.id(), organizationId, externalAccountId);
+    }
+
     int accountsOf(UUID organizationId) {
         return jdbcTemplate.queryForObject("SELECT count(*) FROM channel_accounts WHERE organization_id = ?",
                 Integer.class, organizationId);
@@ -46,5 +52,8 @@ class ChannelsFixture {
             return new RegisteredAccount(account.id(), account.organizationId(), account.channelType(),
                     account.allowsOutbound());
         }
+    }
+
+    record SandboxAccount(UUID id, UUID organizationId, String externalAccountId) {
     }
 }
