@@ -7,5 +7,6 @@ public enum ChannelType {
     TELEGRAM,
     EMAIL,
     SMS,
-    WEBCHAT
+    WEBCHAT,
+    SANDBOX
 }

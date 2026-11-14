@@ -67,6 +67,11 @@ public interface ChannelAdapter {
 }
 ```
 
+En el código (`backend/src/main/java/com/communicatorone/channels/ChannelAdapter.java`, desde #43) el puerto tiene por
+ahora los cuatro primeros métodos; `windowState` y `startConversation` llegan con la ventana y las plantillas (#12).
+El adaptador recibe value objects y la cuenta de canal (`ContactIdentity`, `MessageContent`, `ChannelAccount`) y
+devuelve records; nunca recibe la entidad `Person`, que es interna del módulo `people`. Detalle en `docs/canales.md` (P-046).
+
 **Flujo entrante** (igual para todos los canales):
 1. Llega el webhook; el adaptador lo normaliza a `InboundMessage`.
 2. Se resuelve la `ChannelAccount` → organización.

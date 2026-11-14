@@ -10,8 +10,9 @@ referencia, no el estilo del archivo vecino).
   del resultado observable completo (estado en la base, eventos de dominio publicados, mensajes enviados al fake del
   borde, respuesta HTTP).
 - Tests de dominio: dominio real + PostgreSQL (Testcontainers); fake o stub solo del borde externo (Meta, Telegram,
-  proveedores HTTP; el canal `SANDBOX` cuando exista). Nada de Mockito `verify(...)` ni `@MockitoBean` de objetos
-  propios salvo en el test del propio objeto de borde.
+  proveedores HTTP; para los canales, el adaptador `SANDBOX`, `SandboxChannelAdapter`, que guarda los envíos en
+  memoria y se consulta con `hasSentTextTo(identidad, "texto")`; formato de su payload en `docs/canales.md`). Nada de
+  Mockito `verify(...)` ni `@MockitoBean` de objetos propios salvo en el test del propio objeto de borde.
 - El tiempo siempre por `Clock` inyectado y fijo en el test; nada de `Thread.sleep` ni `now()` directo.
 - Reusá los builders y fixtures de la suite donde vas a escribir; si falta uno que se repite en varias suites, avisá
   en vez de duplicarlo.
