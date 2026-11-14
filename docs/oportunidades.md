@@ -45,7 +45,7 @@ organización; la organización la asigna y filtra Hibernate con `@TenantId` (P-
 | `OpportunityResult` | package-private | `WON`, `LOST`, `NO_RESPONSE` (`OpportunityResult.java:3-7`). En #36 solo se usa `NO_RESPONSE`. |
 | `OpportunitySettings` | package-private | Entidad de la tabla `opportunity_settings`: `id`, `@TenantId organizationId`, `inactivityDaysToClose`, `reentryWindowDays` (`OpportunitySettings.java:22-32`). `of(int, int)` valida (`OpportunitySettings.java:42-46`), `defaults()` da 7 y 3 sin persistir (`OpportunitySettings.java:19-20`, `:48-50`), `inactivityEndsAt` (L + N), `inactivityCutoffAt` (ahora − N, el corte de la consulta del job) y `allowsReentryAt` hacen las cuentas (`OpportunitySettings.java:52-62`). |
 | `OpportunityRepository` | package-private | `findFirstByPersonIdOrderByOpenedAtDesc(UUID)` con `@Lock(PESSIMISTIC_WRITE)`: la última oportunidad de la persona, bloqueada para escritura (`OpportunityRepository.java:14-15`). `findOpenInactiveSince(Instant cutoff)`, JPQL con `@Lock(PESSIMISTIC_WRITE)`: las abiertas con `lastActivityAt <= cutoff`, ordenadas por id (`OpportunityRepository.java:17-23`). |
-| `OpportunitySettingsRepository` | package-private | `findCurrent()`, un JPQL sin filtro (`select s from OpportunitySettings s`) que `@TenantId` limita a la fila de la organización activa (`OpportunitySettingsRepository.java:10-11`). |
+| `OpportunitySettingsRepository` | package-private | `findCurrent()`, un JPQL sin filtro (`select s from OpportunitySettings s`) que `@TenantId` limita a la fila de la organización activa (`OpportunitySettingsRepository.java:10-11`), y el método `default` `currentOrDefaults()`, que devuelve esa fila o, si no hay, `OpportunitySettings.defaults()` (`OpportunitySettingsRepository.java:13-15`). Lo usan `OpportunityTracker` e `InactiveOpportunityClosing`. |
 
 El `package-info.java` con `@ApplicationModule` ya existía desde el scaffold y `ModularStructureTest` ya declaraba
 `opportunities`. #37 sumó, fuera del módulo, `SchedulingConfiguration` en el paquete raíz (`@EnableScheduling`,
@@ -161,7 +161,7 @@ flowchart TD
     V -->|no| G{sincronización de<br/>transacción activa?}
     G -->|sí| X2[IllegalStateException]
     G -->|no| T[transacción con TransactionTemplate:<br/>currentOpportunityOf]
-    T --> S[settings.findCurrent<br/>o defaults 7 / 3]
+    T --> S[settings.currentOrDefaults<br/>fila o defaults 7 / 3]
     S --> F[última oportunidad de la persona<br/>findFirstByPersonIdOrderByOpenedAtDesc<br/>con lock de escritura]
     F --> NOW[now = clock.instant]
     NOW --> E{hay una?}
@@ -199,7 +199,7 @@ flowchart TD
     E -->|no| FIN[fin de la corrida]
     E -->|sí| R[currentOrganization.runAs organizationId]
     R --> T[InactiveOpportunityClosing.closeInactiveOpportunities<br/>una transacción]
-    T --> S[settings.findCurrent<br/>o defaults 7 / 3]
+    T --> S[settings.currentOrDefaults<br/>fila o defaults 7 / 3]
     S --> NOW[now = clock.instant]
     NOW --> Q[findOpenInactiveSince now − N<br/>FOR NO KEY UPDATE, order by id]
     Q --> C[closeIfInactiveAt now, settings<br/>en cada fila: CLOSED / NO_RESPONSE en L + N]
@@ -228,7 +228,8 @@ flowchart TD
 
 `currentOpportunityOf` (`OpportunityTracker.java:47-56`):
 
-1. Lee la configuración de la organización activa o, si no tiene fila, los defaults (`OpportunityTracker.java:48`).
+1. Lee la configuración de la organización activa o, si no tiene fila, los defaults, con `settings.currentOrDefaults()`
+   (`OpportunityTracker.java:48`).
 2. Trae la última oportunidad de la persona (por `openedAt` descendente, la primera) con lock pesimista de escritura
    (`OpportunityTracker.java:49`). El filtro de `@TenantId` limita la búsqueda a la organización activa; el índice
    `opportunities_person_id_opened_at_idx` sirve a esta consulta. El SQL que genera Hibernate (con
@@ -363,7 +364,8 @@ el scheduler de Spring con el cron `communicator-one.opportunities.closing-cron`
    (`OpportunityClosingJob.java:41`): el ámbito se abre fuera de la transacción y la transacción adentro, como pide el
    patrón de procesos sin usuario (`.claude/rules/java.md`).
 3. **`closeInactiveOpportunities`** (`InactiveOpportunityClosing.java:21-27`), en una transacción:
-   1. lee la configuración de la organización o los defaults (`InactiveOpportunityClosing.java:23`);
+   1. lee la configuración de la organización o los defaults con `settings.currentOrDefaults()`
+      (`InactiveOpportunityClosing.java:23`);
    2. lee el reloj una vez, **antes** de la consulta (`InactiveOpportunityClosing.java:24`). El `closedAt` (L + N) no
       depende de `now`; `now` solo decide qué está vencido;
    3. trae con `findOpenInactiveSince(settings.inactivityCutoffAt(now))` (`InactiveOpportunityClosing.java:25`) las
@@ -489,7 +491,8 @@ organización. La configuración por campaña de D-002 se suma cuando existan ca
 - El `@Scheduled` lo toma como placeholder sin default (`OpportunityClosingJob.java:28`): el valor vive solo en
   `application.yml`. No es un `@ConfigurationProperties` (P-037).
 - `-` (`Scheduled.CRON_DISABLED`) apaga el job. Así lo dejan los tests: `TestcontainersConfiguration` registra
-  `closing-cron = "-"` con un `DynamicPropertyRegistrar` (`TestcontainersConfiguration.java:31-34`), y los tests llaman
+  `closing-cron = "-"` en su `DynamicPropertyRegistrar` `testProperties()`, junto con el secreto JWT de test
+  (`TestcontainersConfiguration.java:26-32`; el cron en `:30`), y los tests llaman
   al método directamente. En producción sirve para apagarlo en réplicas (ver «Riesgos»).
 - El scheduling lo activa `SchedulingConfiguration` (`@EnableScheduling`, paquete raíz). Hoy es redundante, porque
   `spring-modulith-moments` (que viene con `spring-modulith-starter-core`) ya lo activa, pero queda explícito (P-037).
@@ -637,8 +640,11 @@ Fixture (`OpportunitiesFixture`), lo agregado en #37:
 - `rivalStartsRecordingActivity(organizationId, opportunityId, at)`: en otro hilo, un `UPDATE` de `last_activity_at`
   que queda sin confirmar hasta `commit()`, con el mismo mecanismo que los rivales de #36.
 - `databaseRejectsClosingOpportunitiesOf(organizationId)`: crea la función plpgsql `reject_closing_opportunities()` y
-  un trigger `BEFORE UPDATE` limitado a esa organización y a `NEW.status = 'CLOSED'`, que lanza una excepción. Devuelve
-  un `AutoCloseable` que borra el trigger y la función.
+  un trigger `BEFORE UPDATE` con el mismo nombre fijo, `reject_closing_opportunities`, limitado a esa organización y a
+  `NEW.status = 'CLOSED'`, que lanza una excepción (`OpportunitiesFixture.java:118-135`). Usa `CREATE FUNCTION` y
+  `CREATE TRIGGER` sin `OR REPLACE`: si quedaran de una corrida anterior, falla en vez de pisarlos; por eso admite una
+  sola organización rechazada a la vez. Devuelve un `AutoCloseable` que borra el trigger y la función con `DROP` sin
+  `IF EXISTS`.
 
 `TenantIsolationTest.everyBusinessEntityBelongsToAnOrganization` cubre que `Opportunity` y `OpportunitySettings` lleven
 `@TenantId`, y `ModularStructureTest` que `opportunities` no dependa de internos de otros módulos.

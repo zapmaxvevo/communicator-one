@@ -24,13 +24,11 @@ public class TestcontainersConfiguration {
     }
 
     @Bean
-    DynamicPropertyRegistrar jwtSecret() {
-        return registry -> registry.add("communicator-one.authentication.jwt-secret", () -> JWT_SECRET);
-    }
-
-    @Bean
-    DynamicPropertyRegistrar opportunityClosingCron() {
-        return registry -> registry.add("communicator-one.opportunities.closing-cron", () -> Scheduled.CRON_DISABLED);
+    DynamicPropertyRegistrar testProperties() {
+        return registry -> {
+            registry.add("communicator-one.authentication.jwt-secret", () -> JWT_SECRET);
+            registry.add("communicator-one.opportunities.closing-cron", () -> Scheduled.CRON_DISABLED);
+        };
     }
 
     @Bean

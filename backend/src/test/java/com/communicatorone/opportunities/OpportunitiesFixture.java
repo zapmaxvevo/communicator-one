@@ -116,22 +116,21 @@ class OpportunitiesFixture {
     }
 
     AutoCloseable databaseRejectsClosingOpportunitiesOf(UUID organizationId) {
-        var trigger = "reject_closing_" + organizationId.toString().replace("-", "");
         jdbcTemplate.execute("""
-                CREATE OR REPLACE FUNCTION reject_closing_opportunities() RETURNS trigger LANGUAGE plpgsql AS $$
+                CREATE FUNCTION reject_closing_opportunities() RETURNS trigger LANGUAGE plpgsql AS $$
                 BEGIN
                     RAISE EXCEPTION 'Closing the opportunities of organization % is rejected', NEW.organization_id;
                 END;
                 $$
                 """);
         jdbcTemplate.execute("""
-                CREATE TRIGGER %s BEFORE UPDATE ON opportunities FOR EACH ROW
+                CREATE TRIGGER reject_closing_opportunities BEFORE UPDATE ON opportunities FOR EACH ROW
                 WHEN (NEW.organization_id = '%s' AND NEW.status = 'CLOSED')
                 EXECUTE FUNCTION reject_closing_opportunities()
-                """.formatted(trigger, organizationId));
+                """.formatted(organizationId));
         return () -> {
-            jdbcTemplate.execute("DROP TRIGGER " + trigger + " ON opportunities");
-            jdbcTemplate.execute("DROP FUNCTION IF EXISTS reject_closing_opportunities()");
+            jdbcTemplate.execute("DROP TRIGGER reject_closing_opportunities ON opportunities");
+            jdbcTemplate.execute("DROP FUNCTION reject_closing_opportunities()");
         };
     }
 

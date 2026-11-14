@@ -20,7 +20,7 @@ class InactiveOpportunityClosing {
 
     @Transactional
     void closeInactiveOpportunities() {
-        var currentSettings = settings.findCurrent().orElseGet(OpportunitySettings::defaults);
+        var currentSettings = settings.currentOrDefaults();
         var now = clock.instant();
         opportunities.findOpenInactiveSince(currentSettings.inactivityCutoffAt(now))
                 .forEach(opportunity -> opportunity.closeIfInactiveAt(now, currentSettings));

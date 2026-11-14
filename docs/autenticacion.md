@@ -380,9 +380,9 @@ Otros:
 
 Fixtures: `OperatorFixture` (mismo paquete de test) crea organizaciones por `JdbcTemplate` y operadores con
 `callAs` + `save(Operator.register(...))`, usando el bean `PasswordEncoder` de la app. `TestcontainersConfiguration`
-registra un secreto JWT solo de test (`TestcontainersConfiguration.java:17`, `:25-28`) y el `MutableClock` como
-`Clock` `@Primary` (`:30-34`), que usan tanto la emisión como la validación del token. `AuthenticationTest` firma los
-tokens armados a mano con el `JwtEncoder` de la app (o con uno de otro secreto, en
+registra un secreto JWT solo de test (`TestcontainersConfiguration.java:18`, y en el bean `testProperties()`, `:26-32`)
+y el `MutableClock` como `Clock` `@Primary` (`:34-38`), que usan tanto la emisión como la validación del token.
+`AuthenticationTest` firma los tokens armados a mano con el `JwtEncoder` de la app (o con uno de otro secreto, en
 `tokenSignedWithAnotherSecretIsRejected`) y lee el `exp` con el `JwtDecoder` de la app.
 
 Sin test automático: que una ruta protegida sin token responde sin `WWW-Authenticate` (verificado a mano contra la

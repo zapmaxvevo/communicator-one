@@ -9,4 +9,8 @@ interface OpportunitySettingsRepository extends JpaRepository<OpportunitySetting
 
     @Query("select s from OpportunitySettings s")
     Optional<OpportunitySettings> findCurrent();
+
+    default OpportunitySettings currentOrDefaults() {
+        return findCurrent().orElseGet(OpportunitySettings::defaults);
+    }
 }
