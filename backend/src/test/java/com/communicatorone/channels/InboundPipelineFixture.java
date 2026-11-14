@@ -72,8 +72,9 @@ class InboundPipelineFixture {
     }
 
     WebhookPayload whatsAppTextTo(String phoneNumberId) {
-        var example = WhatsAppExamples.payload("text-message.json");
-        return new WebhookPayload(example.body().replace("106540352242922", phoneNumberId));
+        var example = WhatsAppExamples.payload("text-message.json").body();
+        assertThat(example).contains(WhatsAppExamples.PHONE_NUMBER_ID);
+        return new WebhookPayload(example.replace(WhatsAppExamples.PHONE_NUMBER_ID, phoneNumberId));
     }
 
     Conversation conversationWith(UUID organizationId, String phone) {
@@ -233,8 +234,12 @@ class InboundPipelineFixture {
             Instant openedAt, Instant lastActivityAt, Instant closedAt) {
 
         static StoredOpportunity open(UUID id, UUID personId, Instant openedAt, Instant lastActivityAt) {
-            return new StoredOpportunity(id, personId, ChannelType.SANDBOX.name(), "OPEN", null, openedAt,
-                    lastActivityAt, null);
+            return open(id, personId, ChannelType.SANDBOX, openedAt, lastActivityAt);
+        }
+
+        static StoredOpportunity open(UUID id, UUID personId, ChannelType source, Instant openedAt,
+                Instant lastActivityAt) {
+            return new StoredOpportunity(id, personId, source.name(), "OPEN", null, openedAt, lastActivityAt, null);
         }
 
         StoredOpportunity closedWithoutResponseAt(Instant closedAt) {
@@ -249,8 +254,14 @@ class InboundPipelineFixture {
 
         static StoredMessage received(UUID id, UUID personId, UUID opportunityId, UUID channelAccountId,
                 String externalId, String text, Instant occurredAt, Instant recordedAt) {
-            return new StoredMessage(id, personId, opportunityId, channelAccountId, ChannelType.SANDBOX,
-                    SenderType.CUSTOMER, externalId, text, MessageStatus.DELIVERED, occurredAt, recordedAt);
+            return received(id, personId, opportunityId, channelAccountId, ChannelType.SANDBOX, externalId, text,
+                    occurredAt, recordedAt);
+        }
+
+        static StoredMessage received(UUID id, UUID personId, UUID opportunityId, UUID channelAccountId,
+                ChannelType channel, String externalId, String text, Instant occurredAt, Instant recordedAt) {
+            return new StoredMessage(id, personId, opportunityId, channelAccountId, channel, SenderType.CUSTOMER,
+                    externalId, text, MessageStatus.DELIVERED, occurredAt, recordedAt);
         }
 
         MessageReceived event(UUID organizationId) {

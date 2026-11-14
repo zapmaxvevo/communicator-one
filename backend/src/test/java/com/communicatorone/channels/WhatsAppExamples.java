@@ -7,6 +7,9 @@ import org.springframework.core.io.ClassPathResource;
 
 final class WhatsAppExamples {
 
+    static final String PHONE_NUMBER_ID = "106540352242922";
+    static final String TEXT_MESSAGE_ID = "wamid.HBgNNTQ5MTE1NTU1MDEwMRUCABIYFjNFQjBBMUYyQzk4RDQ3RTVCNjAxAA==";
+
     private WhatsAppExamples() {
     }
 

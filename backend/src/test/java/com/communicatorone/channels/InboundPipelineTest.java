@@ -15,7 +15,6 @@ import com.communicatorone.channels.InboundPipelineFixture.StoredMessage;
 import com.communicatorone.channels.InboundPipelineFixture.StoredOpportunity;
 import com.communicatorone.messaging.ChannelType;
 import com.communicatorone.messaging.MessageStatus;
-import com.communicatorone.messaging.SenderType;
 import com.communicatorone.messaging.Timeline;
 import com.communicatorone.opportunities.OpportunityTracker;
 import com.communicatorone.organizations.CurrentOrganization;
@@ -50,8 +49,6 @@ class InboundPipelineTest {
     private static final String ANA = "+5491155550101";
     private static final String ANA_AS_TYPED = "+54 9 11 5555-0101";
     private static final String JUAN = "+5491155550202";
-    private static final String WHATSAPP_MESSAGE_ID =
-            "wamid.HBgNNTQ5MTE1NTU1MDEwMRUCABIYFjNFQjBBMUYyQzk4RDQ3RTVCNjAxAA==";
 
     private final InboundPipeline pipeline;
     private final ReceivedMessages receivedMessages;
@@ -124,11 +121,10 @@ class InboundPipelineTest {
         var message = assertThat(fixture.messagesOf(acme)).singleElement().actual();
         var person = opportunity.personId();
         assertThat(fixture.identitiesOf(acme)).containsExactly(new StoredIdentity(person, IdentityKind.PHONE, ANA));
-        assertThat(opportunity).isEqualTo(new StoredOpportunity(opportunity.id(), person,
-                ChannelType.WHATSAPP.name(), "OPEN", null, NOW, NOW, null));
-        assertThat(message).isEqualTo(new StoredMessage(message.id(), person, opportunity.id(), account.id(),
-                ChannelType.WHATSAPP, SenderType.CUSTOMER, WHATSAPP_MESSAGE_ID, "Hola, ¿tienen financiación?",
-                MessageStatus.DELIVERED, SENT_AT, NOW));
+        assertThat(opportunity).isEqualTo(
+                StoredOpportunity.open(opportunity.id(), person, ChannelType.WHATSAPP, NOW, NOW));
+        assertThat(message).isEqualTo(StoredMessage.received(message.id(), person, opportunity.id(), account.id(),
+                ChannelType.WHATSAPP, WhatsAppExamples.TEXT_MESSAGE_ID, "Hola, ¿tienen financiación?", SENT_AT, NOW));
         assertThat(receivedMessages.in(acme)).containsExactly(message.event(acme));
     }
 

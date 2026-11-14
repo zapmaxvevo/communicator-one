@@ -10,6 +10,7 @@ import java.time.DateTimeException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -49,7 +50,7 @@ class WhatsAppChannelAdapter implements ChannelAdapter {
     public List<InboundMessage> parseInbound(WebhookPayload payload) {
         var notifications = parsed(payload);
         if (notifications.ignoredMessages() > 0) {
-            log.info("Ignored {} inbound WHATSAPP messages of unsupported types", notifications.ignoredMessages());
+            log.info("Ignored {} inbound WHATSAPP messages", notifications.ignoredMessages());
         }
         return notifications.inboundMessages();
     }
@@ -83,16 +84,15 @@ class WhatsAppChannelAdapter implements ChannelAdapter {
         }
 
         WhatsAppNotifications notifications() {
-            var notifications = entry.stream()
+            var values = entry.stream()
                     .flatMap(each -> each.changes().stream())
                     .map(WhatsAppChange::messagesValue)
                     .flatMap(Optional::stream)
-                    .map(WhatsAppValue::notifications)
                     .toList();
-            return new WhatsAppNotifications(
-                    notifications.stream().flatMap(each -> each.inboundMessages().stream()).toList(),
-                    notifications.stream().flatMap(each -> each.statusUpdates().stream()).toList(),
-                    notifications.stream().mapToInt(WhatsAppNotifications::ignoredMessages).sum());
+            var inboundMessages = values.stream().flatMap(value -> value.inboundMessages().stream()).toList();
+            var statusUpdates = values.stream().flatMap(value -> value.statusUpdates().stream()).toList();
+            var receivedMessages = values.stream().mapToInt(value -> value.messages().size()).sum();
+            return new WhatsAppNotifications(inboundMessages, statusUpdates, receivedMessages - inboundMessages.size());
         }
     }
 
@@ -126,23 +126,24 @@ class WhatsAppChannelAdapter implements ChannelAdapter {
 
         WhatsAppValue {
             Assert.notNull(metadata, "A WhatsApp messages change needs its metadata");
-            messages = messages == null ? List.of() : messages;
-            statuses = statuses == null ? List.of() : statuses;
+            messages = Objects.requireNonNullElse(messages, List.of());
+            statuses = Objects.requireNonNullElse(statuses, List.of());
             Assert.noNullElements(messages, "A WhatsApp messages change has no null messages");
             Assert.noNullElements(statuses, "A WhatsApp messages change has no null statuses");
         }
 
-        WhatsAppNotifications notifications() {
-            var account = metadata.phoneNumberId();
-            var inboundMessages = messages.stream()
-                    .map(message -> message.inboundTo(account))
+        List<InboundMessage> inboundMessages() {
+            return messages.stream()
+                    .map(message -> message.inboundTo(metadata.phoneNumberId()))
                     .flatMap(Optional::stream)
                     .toList();
-            var statusUpdates = statuses.stream()
-                    .map(status -> status.updateOf(account))
+        }
+
+        List<StatusUpdate> statusUpdates() {
+            return statuses.stream()
+                    .map(status -> status.updateOf(metadata.phoneNumberId()))
                     .flatMap(Optional::stream)
                     .toList();
-            return new WhatsAppNotifications(inboundMessages, statusUpdates, messages.size() - inboundMessages.size());
         }
     }
 
@@ -164,7 +165,7 @@ class WhatsAppChannelAdapter implements ChannelAdapter {
 
         private InboundMessage textFrom(ContactIdentity sender, String account) {
             Assert.notNull(text, "A WhatsApp text message needs its text");
-            return new InboundMessage(account, sender, id, text.content(),
+            return new InboundMessage(account, sender, id, new MessageContent(text.body()),
                     Instant.ofEpochSecond(Long.parseLong(timestamp)));
         }
 
@@ -187,10 +188,6 @@ class WhatsAppChannelAdapter implements ChannelAdapter {
     }
 
     record WhatsAppText(String body) {
-
-        MessageContent content() {
-            return new MessageContent(body);
-        }
 
         @Override
         public String toString() {
