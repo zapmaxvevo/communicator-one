@@ -377,6 +377,46 @@ class InboundPipelineTest {
     }
 
     @Test
+    void webhookWithNulCharacterInAMessageIsRejectedWithoutRecordingAnything() {
+        // Given
+        var acme = channelAccounts.organization("Acme");
+        var account = channelAccounts.sandboxAccount(acme);
+        var payload = fixture.messagesTo(account.externalAccountId(),
+                new IncomingText(fixture.messageId(), ANA, "Hola", SENT_AT),
+                new IncomingText(fixture.messageId(), JUAN, "hola\\u0000", SENT_AT));
+
+        // When
+        var rejection = catchThrowable(() -> pipeline.receive(ChannelType.SANDBOX, payload));
+
+        // Then
+        assertThat(rejection).isInstanceOf(InvalidWebhookPayloadException.class);
+        assertThat(fixture.identitiesOf(acme)).isEmpty();
+        assertThat(fixture.opportunitiesOf(acme)).isEmpty();
+        assertThat(fixture.messagesOf(acme)).isEmpty();
+        assertThat(receivedMessages.all()).isEmpty();
+    }
+
+    @Test
+    void webhookWithNulCharacterInAStatusIsRejectedWithoutChangingAnyStatus() {
+        // Given
+        var acme = channelAccounts.organization("Acme");
+        var account = channelAccounts.sandboxAccount(acme);
+        var conversation = fixture.conversationWith(acme, ANA);
+        var reply = fixture.operatorReplied(account, conversation, "Sí, hasta 12 cuotas");
+        var payload = fixture.statusesTo(account.externalAccountId(),
+                new StatusReport(reply.externalId(), MessageStatus.DELIVERED),
+                new StatusReport(reply.externalId() + "\\u0000", MessageStatus.READ));
+
+        // When
+        var rejection = catchThrowable(() -> pipeline.receive(ChannelType.SANDBOX, payload));
+
+        // Then
+        assertThat(rejection).isInstanceOf(InvalidWebhookPayloadException.class);
+        assertThat(fixture.messagesOf(acme)).containsExactly(reply);
+        assertThat(receivedMessages.all()).isEmpty();
+    }
+
+    @Test
     void copyOfTheWebhookRecordedConcurrentlyElsewherePublishesNoEvent() throws Exception {
         // Given
         var acme = channelAccounts.organization("Acme");

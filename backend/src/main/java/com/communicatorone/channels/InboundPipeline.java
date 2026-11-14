@@ -18,7 +18,7 @@ class InboundPipeline {
 
     private static final Logger log = LoggerFactory.getLogger(InboundPipeline.class);
     private static final int MAX_LOGGED_ID_LENGTH = 64;
-    private static final Pattern CONTROL_CHARACTERS = Pattern.compile("\\p{Cntrl}");
+    private static final Pattern CONTROL_CHARACTERS = Pattern.compile("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]");
 
     private final ChannelAdapterRegistry adapters;
     private final ChannelAccountDirectory accounts;

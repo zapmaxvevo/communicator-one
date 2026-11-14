@@ -9,5 +9,7 @@ record StatusUpdate(String externalAccountId, String externalId, MessageStatus s
         Assert.hasText(externalAccountId, "A status update needs the account of its message");
         Assert.hasText(externalId, "A status update needs the id of its message");
         Assert.notNull(status, "A status update needs its status");
+        Assert.doesNotContain(externalAccountId, "\0", "A status update cannot contain NUL in its account");
+        Assert.doesNotContain(externalId, "\0", "A status update cannot contain NUL in its id");
     }
 }

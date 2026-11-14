@@ -71,8 +71,8 @@ Puerto, registro y adaptador de prueba (#43):
 |---|---|---|
 | `ChannelAdapter` | package-private | Interfaz del puerto (`ChannelAdapter.java:8-17`): `type()`, `parseInbound(WebhookPayload)`, `parseStatusUpdates(WebhookPayload)` y `send(ContactIdentity to, ChannelAccount from, MessageContent content)`. Contrato en «Puerto de canal». |
 | `WebhookPayload` | package-private | `record (String body)`: el cuerpo del webhook tal como llegó. Exige `body` no nulo (`WebhookPayload.java:7-9`); el cuerpo vacío lo rechaza el adaptador. `toString` devuelve `WebhookPayload[body]`, sin el cuerpo, que trae datos personales (`WebhookPayload.java:11-14`). Sin headers ni bytes crudos (P-046). |
-| `InboundMessage` | package-private | `record (externalAccountId, ContactIdentity sender, externalId, MessageContent content, Instant occurredAt)` (`InboundMessage.java:8-9`). El constructor compacto exige los cinco con `Assert` (`InboundMessage.java:11-17`); no recorta (el id de cuenta lo recorta `resolve`). No lleva el tipo de canal: lo da el adaptador o la cuenta resuelta (P-045). |
-| `StatusUpdate` | package-private | `record (externalAccountId, externalId, MessageStatus status)` (`StatusUpdate.java:6`), con los tres obligatorios (`StatusUpdate.java:8-12`). |
+| `InboundMessage` | package-private | `record (externalAccountId, ContactIdentity sender, externalId, MessageContent content, Instant occurredAt)` (`InboundMessage.java:8-9`). El constructor compacto exige los cinco con `Assert` y rechaza U+0000 (NUL) en el id de cuenta, el valor de la identidad, el `externalId` y el texto, con un `Assert.doesNotContain(campo, "\0", …)` por campo (`InboundMessage.java:11-21`, `:17-20`); no recorta (el id de cuenta lo recorta `resolve`). No lleva el tipo de canal: lo da el adaptador o la cuenta resuelta (P-045). |
+| `StatusUpdate` | package-private | `record (externalAccountId, externalId, MessageStatus status)` (`StatusUpdate.java:6`), con los tres obligatorios y sin U+0000 (NUL) en el id de cuenta ni en el `externalId`, también con `Assert.doesNotContain` (`StatusUpdate.java:8-14`, `:12-13`). |
 | `SendResult` | package-private | `record (String externalId)`: el id que el proveedor le dio al mensaje enviado, obligatorio (`SendResult.java:5-9`). Las fallas de envío las modela #12. |
 | `InvalidWebhookPayloadException` | package-private | Unchecked. Mensaje `Invalid <tipo> webhook payload`, sin causa encadenada ni detalle (`InvalidWebhookPayloadException.java:5-10`): el error del parser puede citar fragmentos del payload, como el valor de un teléfono (mismo criterio que `InvalidContactIdentityException`). |
 | `ChannelAdapterRegistry` | package-private | `@Component` que recibe todos los beans `ChannelAdapter` (`ChannelAdapterRegistry.java:15-19`) y los indexa por `type()`. `adapterFor(ChannelType)` (`ChannelAdapterRegistry.java:21-27`). Contrato en «Registro de adaptadores». |
@@ -292,16 +292,16 @@ Un JSON propio (no imita a ningún proveedor), con un objeto por webhook:
 
 | Campo | Regla | Pasa a |
 |---|---|---|
-| `account` | Obligatorio, no en blanco (`SandboxChannelAdapter.java:71`) | `externalAccountId` de todos los mensajes y estados del payload |
+| `account` | Obligatorio, no en blanco (`SandboxChannelAdapter.java:71`), sin U+0000 (ver «Parseo y payloads inválidos») | `externalAccountId` de todos los mensajes y estados del payload |
 | `messages` | Opcional: ausente o `null` es lista vacía; un elemento `null` es inválido (`SandboxChannelAdapter.java:72-75`) | Un `InboundMessage` por elemento, en orden |
-| `messages[].id` | Obligatorio, no en blanco (lo exige `InboundMessage`, `InboundMessage.java:14`) | `externalId` (único por cuenta, P-042) |
+| `messages[].id` | Obligatorio, no en blanco (lo exige `InboundMessage`, `InboundMessage.java:14`), sin U+0000 | `externalId` (único por cuenta, P-042) |
 | `messages[].from` | Obligatorio, objeto con `kind` y `value` (`SandboxChannelAdapter.java:90`) | `sender` |
 | `messages[].from.kind` | Obligatorio (`SandboxChannelAdapter.java:107`); nombre exacto de `IdentityKind`, en mayúsculas: `PHONE`, `EMAIL`, `INSTAGRAM_USER`, `MESSENGER_USER`, `TELEGRAM_USER`. Un nombre desconocido o un número (`0`) los rechaza Jackson al leer el enum | `sender.kind` |
-| `messages[].from.value` | Obligatorio; se normaliza con `new ContactIdentity(kind, value)` (`SandboxChannelAdapter.java:110-112`), que también rechaza el valor nulo o en blanco: teléfono a E.164, email a minúsculas, usuarios recortados (`docs/personas.md`) | `sender.value` |
-| `messages[].text` | Obligatorio y no vacío (lo exige `MessageContent`); se aceptan espacios y no se recorta | `content` |
+| `messages[].from.value` | Obligatorio; se normaliza con `new ContactIdentity(kind, value)` (`SandboxChannelAdapter.java:110-112`), que también rechaza el valor nulo o en blanco: teléfono a E.164, email a minúsculas, usuarios recortados (`docs/personas.md`). Sin U+0000, salvo con `PHONE`, donde lo resuelve la normalización (ver «Parseo y payloads inválidos») | `sender.value` |
+| `messages[].text` | Obligatorio y no vacío (lo exige `MessageContent`); se aceptan espacios y no se recorta; sin U+0000 | `content` |
 | `messages[].sentAt` | Obligatorio (`SandboxChannelAdapter.java:91`); texto con un instante ISO-8601, que se convierte con `Instant.parse` (`SandboxChannelAdapter.java:95`). Un desfase (`2026-03-02T05:59:20-03:00`) pasa a UTC; un número, un epoch como texto (`"1700000000"`) o espacios alrededor se rechazan. No se completa con el reloj | `occurredAt` |
 | `statuses` | Opcional, como `messages` | Un `StatusUpdate` por elemento, en orden |
-| `statuses[].messageId` | Obligatorio, no en blanco (lo exige `StatusUpdate`, `StatusUpdate.java:10`): el `externalId` que devolvió `send` | `externalId` |
+| `statuses[].messageId` | Obligatorio, no en blanco (lo exige `StatusUpdate`, `StatusUpdate.java:10`): el `externalId` que devolvió `send`; sin U+0000 | `externalId` |
 | `statuses[].status` | Obligatorio (lo exige `StatusUpdate`, `StatusUpdate.java:11`, que solo pide no nulo); nombre exacto de `MessageStatus`: `SENT`, `FAILED`, `DELIVERED`, `READ`, `DELETED`. El nombre lo controla Jackson al leer el enum, que también rechaza un número (`1`) o un número como texto (`"1"`) | `status` |
 
 Salida del ejemplo (como en `SandboxChannelAdapterTest`):
@@ -368,6 +368,19 @@ puede citar el payload). No hay `catch (Exception)`: un error que no sea de dato
 | `"sentAt": "ayer a la tarde"`, `"sentAt": 1700000000` | `Instant.parse` lanza `DateTimeParseException` (el número llega como el texto `"1700000000"`) |
 | `"messages": [null]`, `"statuses": [null]` | `Assert.noNullElements` de `SandboxWebhook` |
 | Estado sin `messageId` o sin `status` | `Assert` de `StatusUpdate` |
+| Un U+0000 (NUL, `\u0000` en el JSON) en `account`, `messages[].id`, `text`, `statuses[].messageId`, o en `from.value` con `EMAIL` o un usuario de canal | `Assert.doesNotContain` de `InboundMessage` o de `StatusUpdate` (`InboundMessage.java:17-20`, `StatusUpdate.java:12-13`), que lanza `IllegalArgumentException` |
+| Un U+0000 en medio de `from.value` con `PHONE` (`"+54911\u00005550101"`) | No llega a `InboundMessage`: libphonenumber no lo reconoce como teléfono y `ContactIdentity` lanza `InvalidContactIdentityException` |
+
+Con `PHONE`, un NUL al principio o al final de `from.value` no invalida el payload: `strip` no lo quita (no es espacio),
+pero libphonenumber descarta lo que hay antes del primer `+` o dígito y después del último dígito, así que
+`"+5491155550101\u0000"` queda `+5491155550101` en silencio (`ContactIdentity.java:36-38`, `:44-50`). En ningún caso un
+NUL llega a la base.
+
+El NUL se rechaza en el parseo porque PostgreSQL no lo acepta en una columna `TEXT`: antes llegaba a la base y fallaba
+recién al escribir, con los mensajes anteriores del payload, y del que fallaba la persona y la actividad, ya
+confirmados (o los estados anteriores, si el NUL estaba en un estado). Ahora el payload entero se rechaza antes de la
+primera escritura. El de `account` se detecta al armar el primer mensaje o estado: un payload sin ninguno no se
+rechaza, pero tampoco escribe nada.
 
 `WebhookPayload` con `body` nulo no llega al adaptador: lo rechaza su propio constructor con
 `IllegalArgumentException` («A webhook payload needs its body»).
@@ -435,7 +448,7 @@ flowchart TD
     R -->|JSON roto, campo o enum desconocidos,<br/>enum como número,<br/>falta account, from, sentAt o kind,<br/>elemento null| X[InvalidWebhookPayloadException<br/>Invalid SANDBOX webhook payload]
     R -->|null| X
     R --> B["arma las dos listas:<br/>InboundMessage (ContactIdentity, MessageContent)<br/>y StatusUpdate"]
-    B -->|falta id, messageId o status, fecha inválida,<br/>identidad o texto inválidos| X
+    B -->|falta id, messageId o status, fecha inválida,<br/>identidad o texto inválidos, NUL U+0000| X
     B --> S[SandboxNotifications]
     S -->|parseInbound| I[List de InboundMessage]
     S -->|parseStatusUpdates| U[List de StatusUpdate]
@@ -530,6 +543,7 @@ sandbox-out-1:     pasa a READ si es un mensaje de esa cuenta con un estado de r
 | La misma persona a dos cuentas de la misma organización | Una persona y una oportunidad, dos mensajes, cada uno con su cuenta |
 | Mensaje o estado para una cuenta que no está registrada | WARN y descarte, sin excepción ni escritura en ninguna organización |
 | Payload con un teléfono inválido junto a uno válido | `InvalidWebhookPayloadException`; nada guardado, sin evento |
+| Payload con un NUL (U+0000) en el texto de un mensaje, o en el id de un estado, junto a partes válidas | `InvalidWebhookPayloadException`; nada guardado ni ningún estado cambiado, sin evento |
 | Estado `READ` y después `DELIVERED` del mismo saliente | Queda `READ` (`Message.advanceTo`, P-041); sin evento |
 | Estado de un `externalId` que no está en esa cuenta | Ignorado (`UNKNOWN_MESSAGE`), sin error; los demás estados del payload se aplican |
 
@@ -636,9 +650,13 @@ Inbound SANDBOX notification for unknown channel account sandbox-desconocida was
 
 Lleva solo el tipo de canal y el id de nuestra cuenta, nunca el remitente ni el texto. El id viene del payload, que
 todavía no tiene firma verificada: antes de loguearlo, el privado `loggable` (`InboundPipeline.java:64-67`) lo trunca a
-64 caracteres (`MAX_LOGGED_ID_LENGTH`, `:20`) y reemplaza cada carácter de control ASCII (`CONTROL_CHARACTERS`,
-`\p{Cntrl}`, `:21`; entre ellos CR y LF) por `_`, para que un payload no pueda falsear líneas del log ni inflarlo. Por
-ejemplo, `"cuenta\r\nWARN falso"` se loguea como `cuenta__WARN falso`.
+64 caracteres (`MAX_LOGGED_ID_LENGTH`, `:20`) y reemplaza por `_` cada carácter que coincide con `CONTROL_CHARACTERS`
+(`[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]`, `:21`): los de control, ASCII y Unicode (CR, LF, TAB, U+0085 NEL); los de formato
+(U+200B espacio de ancho cero, U+200E marca de izquierda a derecha, U+202E inversión bidireccional, U+FEFF), y los
+separadores de línea (U+2028) y de párrafo (U+2029). Así un payload no puede falsear líneas del log, esconder o
+invertir texto en un visor, ni inflarlo. Por ejemplo, `"cuenta\r\nWARN falso"` se loguea como `cuenta__WARN falso`, y
+`"cuenta\u202Eosla"` como `cuenta_osla`. Primero trunca y después reemplaza, así que el resultado nunca pasa de 64. Un
+NUL no llega hasta acá: con al menos un mensaje o estado, lo rechaza el parseo.
 
 ### Carreras y falla parcial
 
@@ -653,6 +671,8 @@ ejemplo, `"cuenta\r\nWARN falso"` se loguea como `cuenta__WARN falso`.
   adelanta otra vez `lastActivityAt` (`docs/oportunidades.md`, «Riesgos»).
 - **Falla a mitad de un payload**: la excepción corta el procesamiento; los mensajes anteriores ya están confirmados, y
   los siguientes y todos los estados del payload no se procesan. En el reintento, `isRecorded` saltea los confirmados.
+  Un NUL (U+0000) en un texto o un id ya no provoca este caso (PostgreSQL lo rechazaba al escribir): lo rechaza el
+  parseo, antes de escribir nada (ver «Parseo y payloads inválidos»).
 
 ### Evento `MessageReceived`
 
@@ -819,8 +839,8 @@ base). Usa el `SandboxChannelAdapter` real y un adaptador de mentira declarado e
 
 `backend/src/test/java/com/communicatorone/channels/SandboxChannelAdapterTest.java` (#43, unitario, sin Spring ni
 base). Los payloads van en text blocks del propio test (formato propio, P-048), no en `src/test/resources`. `send`
-usa `ChannelAccount.register(SANDBOX, "sandbox-acme", "Pruebas", true)` sin persistir. 8 métodos, 59 ejecuciones
-(el parametrizado corre 26 payloads en los dos métodos de parseo).
+usa `ChannelAccount.register(SANDBOX, "sandbox-acme", "Pruebas", true)` sin persistir. 8 métodos, 71 ejecuciones
+(el parametrizado corre 32 payloads en los dos métodos de parseo).
 
 | Test | Qué cubre |
 |---|---|
@@ -829,7 +849,7 @@ usa `ChannelAccount.register(SANDBOX, "sandbox-acme", "Pruebas", true)` sin pers
 | `sandboxPayloadBecomesStatusUpdatesOfItsAccountInTheOrderTheyArrived` | Tres estados, con `READ` antes que `DELIVERED` para el mismo mensaje: salen tal cual y en el orden del payload (el parser no reordena ni deduplica). |
 | `payloadWithOnlyStatusesHasNoInboundMessages` | Sin `messages`: `parseInbound` da vacío y `parseStatusUpdates`, el estado. |
 | `payloadWithOnlyMessagesHasNoStatusUpdates` | Sin `statuses`: `parseStatusUpdates` da vacío y `parseInbound`, el mensaje. |
-| `malformedSandboxPayloadIsRejected` | Parametrizado, cada caso en `parseInbound` y en `parseStatusUpdates`: no JSON, vacío, `null`, sin `account` o en blanco, clave `messages` mal escrita, mensaje con un campo desconocido, `sentAt` numérico, mensaje sin `id`, `from`, `text` o `sentAt`, remitente sin `value`, texto vacío, `kind` desconocido o numérico, teléfono y email inválidos, fecha mal formada, mensaje `null`, estado sin `messageId` o sin `status`, `status` desconocido, numérico o como texto numérico, y estado `null`. Afirma `InvalidWebhookPayloadException`, el mensaje exacto y que no tiene causa. |
+| `malformedSandboxPayloadIsRejected` | Parametrizado, cada caso en `parseInbound` y en `parseStatusUpdates`: no JSON, vacío, `null`, sin `account` o en blanco, clave `messages` mal escrita, mensaje con un campo desconocido, `sentAt` numérico, mensaje sin `id`, `from`, `text` o `sentAt`, remitente sin `value`, texto vacío, `kind` desconocido o numérico, teléfono y email inválidos, fecha mal formada, mensaje `null`, estado sin `messageId` o sin `status`, `status` desconocido, numérico o como texto numérico, estado `null`, y un NUL (`\u0000`) en cada campo que lo rechaza: la cuenta de un mensaje, el id de un mensaje, el valor de un remitente `TELEGRAM_USER` (un usuario solo se recorta, así que el NUL llega a `InboundMessage`), el texto, la cuenta de un estado y el `messageId` de un estado. Afirma `InvalidWebhookPayloadException`, el mensaje exacto y que no tiene causa. |
 | `sendingRecordsTheTextForItsRecipient` | `send` devuelve un id `sandbox-…`; `hasSentTextTo` da `true` para ese destinatario y texto, y `false` con otro texto o con otro destinatario. |
 | `eachSendGetsItsOwnExternalId` | Dos envíos iguales a un email tienen ids distintos. |
 
@@ -858,7 +878,7 @@ el pipeline real del contexto (registro con el `SandboxChannelAdapter`, director
   una `ConcurrentLinkedQueue`; se vacía en `@BeforeEach` y se consulta por organización (`in`) o entera (`all`). No se
   usa `@RecordApplicationEvents` porque está ligado al hilo del test, y la carrera publica desde otro.
 
-14 métodos, 14 ejecuciones.
+16 métodos, 16 ejecuciones.
 
 | Test | Qué cubre |
 |---|---|
@@ -872,6 +892,8 @@ el pipeline real del contexto (registro con el `SandboxChannelAdapter`, director
 | `samePersonWritingToTwoAccountsOfTheOrganizationKeepsOneOpportunity` | Dos cuentas `SANDBOX` de Acme: una persona, una oportunidad con `lastActivityAt` adelantado, dos mensajes con su cuenta cada uno, dos eventos. |
 | `messageForUnknownChannelAccountIsDiscardedWithoutTouchingAnyOrganization` | Cuenta no registrada: sin excepción; ninguna identidad con ese teléfono ni mensaje con ese `externalId` en ninguna organización; Acme sin identidades ni oportunidades; ningún evento. |
 | `invalidWebhookPayloadIsRejectedWithoutRecordingAnything` | Un teléfono sin `+` junto a uno válido: `InvalidWebhookPayloadException`; Acme sin identidades, oportunidades ni mensajes; ningún evento. |
+| `webhookWithNulCharacterInAMessageIsRejectedWithoutRecordingAnything` | Un mensaje válido de Ana seguido de uno de Juan con `hola\u0000`: `InvalidWebhookPayloadException`; Acme sin identidades, oportunidades ni mensajes (tampoco los de Ana, que va primero); ningún evento. |
+| `webhookWithNulCharacterInAStatusIsRejectedWithoutChangingAnyStatus` | Un saliente con un `DELIVERED` válido seguido de un `READ` con el `externalId` terminado en `\u0000`: `InvalidWebhookPayloadException`; el saliente queda igual que antes (tampoco aplica el `DELIVERED`); ningún evento. |
 | `copyOfTheWebhookRecordedConcurrentlyElsewherePublishesNoEvent` | La persona ya tiene conversación; un rival inserta el mismo `externalId` sin confirmar; el pipeline corre en otro hilo y se espera a que quede bloqueado en el `INSERT`; el rival confirma. Una identidad, la misma oportunidad, un solo mensaje (el del rival) y ningún evento. |
 | `deliveryReportArrivingAfterTheReadReportDoesNotMoveTheStatusBack` | Un saliente recibe `READ` en un webhook y `DELIVERED` en otro: queda `READ`; ningún evento. |
 | `statusForUnknownMessageIsIgnoredWithoutFailingTheWebhook` | Un estado de un `externalId` que no existe, seguido de uno válido: sin excepción, el saliente pasa a `DELIVERED`; ningún evento. |
@@ -880,7 +902,8 @@ el pipeline real del contexto (registro con el `SandboxChannelAdapter`, director
 Sin test en #10: el canal sin adaptador (lo cubre `ChannelAdapterRegistryTest.channelTypeWithoutAdapterIsRejected`; un
 test con `WHATSAPP` se rompería con #11), la llamada dentro de una transacción (la frena `resolve`, probado en
 `ChannelAccountDirectoryTest`), una falla de la base a mitad de un payload, y el texto y el saneamiento del WARN de
-cuenta desconocida.
+cuenta desconocida. El NUL se prueba de punta a punta solo en el texto de un mensaje y en el id de un estado; los seis
+campos que lo rechazan tienen su caso en `SandboxChannelAdapterTest.malformedSandboxPayloadIsRejected`.
 
 `TenantIsolationTest.everyBusinessEntityBelongsToAnOrganization` cubre que `ChannelAccount` lleve `@TenantId`, y
 `ModularStructureTest` que `channels` no use internos de `messaging`, `organizations`, `people` ni `opportunities`.
@@ -935,7 +958,9 @@ Docker: `./mvnw test -Dtest='ChannelAdapterRegistryTest,SandboxChannelAdapterTes
   «Evento `MessageReceived`»).
 - **Falla parcial de un payload**: una falla de la base a mitad de un payload deja confirmados los mensajes anteriores
   y no procesa los siguientes ni los estados; el reintento del proveedor saltea los confirmados. Un mensaje que falla
-  entre `recordActivity` y `recordReceived` deja la actividad sin mensaje (`docs/oportunidades.md`).
+  entre `recordActivity` y `recordReceived` deja la actividad sin mensaje (`docs/oportunidades.md`). El caso del NUL
+  (U+0000), que PostgreSQL rechaza en `TEXT` y antes fallaba a mitad de camino, quedó cerrado en #10: lo rechaza el
+  parseo, todo o nada.
 - **`WebhookPayload` es solo el cuerpo como texto**, sin headers ni bytes crudos. La firma `X-Hub-Signature-256` de
   Meta se calcula sobre los bytes exactos del cuerpo: #11 reevalúa si suma headers o `byte[]` (P-046).
 - **#10 (pipeline entrante): hecho.** Llama a `resolve` fuera de transacción, descarta con WARN la cuenta

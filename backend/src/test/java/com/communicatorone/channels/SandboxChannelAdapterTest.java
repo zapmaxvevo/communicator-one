@@ -240,7 +240,23 @@ class SandboxChannelAdapterTest {
                 new MalformedPayload("status as a numeric string", withStatus("""
                         {"messageId": "sandbox-out-1", "status": "1"}""")),
                 new MalformedPayload("null status", """
-                        {"account": "sandbox-acme", "statuses": [null]}"""));
+                        {"account": "sandbox-acme", "statuses": [null]}"""),
+                new MalformedPayload("NUL character in the account of a message", """
+                        {"account": "sandbox\\u0000acme", "messages": [%s]}""".formatted(VALID_MESSAGE)),
+                new MalformedPayload("NUL character in a message id", withMessage("""
+                        {"id": "in\\u0000-1", "from": {"kind": "PHONE", "value": "+5491155550101"},
+                         "text": "Hola", "sentAt": "2026-03-02T08:59:20Z"}""")),
+                new MalformedPayload("NUL character in a sender value", withMessage("""
+                        {"id": "in-1", "from": {"kind": "TELEGRAM_USER", "value": "juan\\u0000perez"},
+                         "text": "Hola", "sentAt": "2026-03-02T08:59:20Z"}""")),
+                new MalformedPayload("NUL character in a message text", withMessage("""
+                        {"id": "in-1", "from": {"kind": "PHONE", "value": "+5491155550101"},
+                         "text": "Ho\\u0000la", "sentAt": "2026-03-02T08:59:20Z"}""")),
+                new MalformedPayload("NUL character in the account of a status", """
+                        {"account": "sandbox\\u0000acme",
+                         "statuses": [{"messageId": "sandbox-out-1", "status": "READ"}]}"""),
+                new MalformedPayload("NUL character in a status message id", withStatus("""
+                        {"messageId": "sandbox\\u0000-out-1", "status": "READ"}""")));
     }
 
     private static String withMessage(String message) {
