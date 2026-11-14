@@ -38,7 +38,8 @@ subpaquete directo nuevo es un módulo más y rompe `ModularStructureTest` a pro
 
 ## Comandos
 
-Requisitos: Java 25 y Docker (para compose y Testcontainers). Los comandos de la web llegan con el issue #3.
+Requisitos: Java 25, Docker (para compose y Testcontainers) y `unzip` (para el wrapper de Maven: sin `unzip`,
+`mvnw` baja el tar.gz y falla la verificación contra el hash del zip). Los comandos de la web llegan con el issue #3.
 
 Entorno local, desde la raíz:
 
@@ -67,11 +68,11 @@ Backend, desde `backend/`:
 curl -s localhost:8080/actuator/health     # {"groups":["liveness","readiness"],"status":"UP"}
 ```
 
-Son públicos `/error` y `/actuator/health` con sus subrutas (liveness y readiness, para las probes); todo lo demás
-(resto de actuator, Swagger, `/v3/api-docs`, `/api/**`) responde 401 hasta el issue #5 (JWT), ver P-006. Los tests de
-integración importan `TestcontainersConfiguration` (`@Import`), que levanta con Docker su propio PostgreSQL (no usa el
-de compose), compartido por toda la corrida con `@ServiceConnection`. Las migraciones Flyway van en
-`src/main/resources/db/migration` (ubicación por defecto; todavía no hay ninguna).
+Son públicos `/error` y `/actuator/health` y todas sus subrutas (entre ellas liveness y readiness, para las probes);
+todo lo demás (resto de actuator, Swagger, `/v3/api-docs`, `/api/**`) responde 401 hasta el issue #5 (JWT), ver P-006.
+Los tests de integración importan `TestcontainersConfiguration` (`@Import`), que levanta con Docker su propio
+PostgreSQL (no usa el de compose), compartido por toda la corrida con `@ServiceConnection`. Las migraciones Flyway van
+en `src/main/resources/db/migration` (ubicación por defecto; todavía no hay ninguna).
 
 El wrapper verifica Maven con `distributionSha256Sum` (`.mvn/wrapper/maven-wrapper.properties`): al cambiar
 `distributionUrl`, poner el `sha256sum` del zip nuevo, verificado contra su `.sha512` de Maven Central.

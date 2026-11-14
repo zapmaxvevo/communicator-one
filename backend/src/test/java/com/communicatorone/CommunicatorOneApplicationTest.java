@@ -34,12 +34,16 @@ class CommunicatorOneApplicationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness"})
+    @ValueSource(strings = {
+            "/actuator/health",
+            "/actuator/health/liveness",
+            "/actuator/health/readiness"})
     void healthAndItsProbesReportApplicationUpToAnonymousMonitoring(String healthPath) {
+        // Given
+        var anonymousRequest = anonymousClient.get().uri(healthPath);
+
         // When
-        var response = anonymousClient.get()
-                .uri(healthPath)
-                .retrieve()
+        var response = anonymousRequest.retrieve()
                 .toEntity(new ParameterizedTypeReference<Map<String, Object>>() {});
 
         // Then
@@ -48,13 +52,18 @@ class CommunicatorOneApplicationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"/api/organizations", "/v3/api-docs", "/swagger-ui/index.html", "/actuator", "/actuator/env"})
-    void everythingOtherThanHealthRejectsRequestsWithoutCredentials(String protectedPath) {
+    @ValueSource(strings = {
+            "/api/organizations",
+            "/v3/api-docs",
+            "/swagger-ui/index.html",
+            "/actuator",
+            "/actuator/env"})
+    void protectedEndpointsRejectRequestsWithoutCredentials(String protectedPath) {
+        // Given
+        var anonymousRequest = anonymousClient.get().uri(protectedPath);
+
         // When
-        var response = anonymousClient.get()
-                .uri(protectedPath)
-                .retrieve()
-                .toBodilessEntity();
+        var response = anonymousRequest.retrieve().toBodilessEntity();
 
         // Then
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
