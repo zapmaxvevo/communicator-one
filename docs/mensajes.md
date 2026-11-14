@@ -1,9 +1,10 @@
 # Mensajes y línea de tiempo
 
 Issue #8. Decisiones: D-001 (cada mensaje queda asociado a la persona y a la oportunidad abierta en ese momento) y
-P-038 (módulo y API), P-039 (cuenta de canal sin FK todavía), P-040 (modelo), P-041 (estados), P-042 (idempotencia y
-concurrencia) en `docs/decisiones.md`. Se apoya en `docs/multi-tenant.md`, en las personas de `docs/personas.md` y en
-las oportunidades de `docs/oportunidades.md`.
+P-038 (módulo y API), P-039 (cuenta de canal sin FK en V6), P-040 (modelo), P-041 (estados), P-042 (idempotencia y
+concurrencia) en `docs/decisiones.md`, más P-045 (#42: FK de tres columnas a `channel_accounts`, en lugar de la de dos
+que anunciaba P-039). Se apoya en `docs/multi-tenant.md`, en las personas de `docs/personas.md`, en las oportunidades
+de `docs/oportunidades.md` y en las cuentas de canal de `docs/canales.md`.
 
 ## Resumen
 
@@ -30,17 +31,18 @@ mensaje ya estaba; eso es lo que #10 usa para publicar el evento «mensaje recib
 Se va a activar desde el flujo entrante (#10), con cada webhook de mensaje; desde el flujo saliente (#12), al enviar; y
 con cada webhook de estado. Hoy nadie la llama fuera de los tests.
 
-Fuera de #8: el adaptador de canal y la tabla `channel_accounts` (#9), el pipeline entrante y la llamada a
-`recordActivity` (#10), adjuntos, plantillas y ubicación (#11, #12), la ventana de conversación y el envío (#12), la
-consulta de la línea de tiempo, REST, WebSocket y los no leídos del operador (#15), y los eventos (P-009).
+Fuera de #8: la tabla `channel_accounts` y su FK desde `messages` (#42, `docs/canales.md`), el adaptador de canal
+(#43), el pipeline entrante y la llamada a `recordActivity` (#10), adjuntos, plantillas y ubicación (#11, #12), la
+ventana de conversación y el envío (#12), la consulta de la línea de tiempo, REST, WebSocket y los no leídos del
+operador (#15), y los eventos (P-009).
 
 ## Piezas
 
 Módulo `messaging` (`backend/src/main/java/com/communicatorone/messaging/`). No depende de ningún otro módulo: la
 persona, la oportunidad y la cuenta de canal llegan como `UUID` (P-019), y la base controla que sean coherentes con FK
 compuestas; la organización la asigna y filtra Hibernate con `@TenantId` (P-018). Es un módulo base: `channels`
-(adaptadores, #9) va a depender de él, y la orquestación de entrada (#10) y de salida (#12) vive en `channels` o en un
-módulo por encima, nunca en `messaging`, porque eso armaría un ciclo (P-038).
+depende de él (desde #42, por `ChannelType`), y la orquestación de entrada (#10) y de salida (#12) vive en
+`channels` o en un módulo por encima, nunca en `messaging`, porque eso armaría un ciclo (P-038).
 
 | Clase | Visibilidad | Qué hace |
 |---|---|---|
@@ -59,7 +61,7 @@ módulo por encima, nunca en `messaging`, porque eso armaría un ciclo (P-038).
 El `package-info.java` con `@ApplicationModule` ya existía desde el scaffold y `ModularStructureTest` ya declaraba
 `messaging`. #8 suma la migración V6 (ver «Esquema»), que además agrega una restricción a `opportunities`.
 
-Los nombres `InboundMessage` y `StatusUpdate` quedan para lo que devuelve el adaptador de canal (#9, `docs/vision.md`
+Los nombres `InboundMessage` y `StatusUpdate` quedan para lo que devuelve el adaptador de canal (#43, `docs/vision.md`
 §5); `ReceivedMessage` y `SentMessage` son los comandos de `messaging`.
 
 ## API y contrato
@@ -82,7 +84,7 @@ boolean known = timeline.isRecorded(channelAccountId, "wamid.HBgNNTQ5MTE1NTU1MDE
 ```
 
 Pasar del payload del proveedor (por ejemplo, un `statuses[].status = "delivered"` de WhatsApp) a estos comandos es
-trabajo del adaptador (#9, #11): `messaging` no conoce payloads.
+trabajo del adaptador (#43, #11): `messaging` no conoce payloads.
 
 | Operación y entrada | Salida |
 |---|---|
@@ -99,6 +101,7 @@ trabajo del adaptador (#9, #11): `messaging` no conoce payloads.
 | `record*` sin organización activa | `DataIntegrityViolationException` (FK `messages_organization_id_fkey` contra el centinela), nada guardado |
 | `record*` con una persona o una oportunidad de otra organización | `DataIntegrityViolationException` (FK compuestas), nada guardado |
 | `record*` con una oportunidad de otra persona de la misma organización | `DataIntegrityViolationException` (`messages_opportunity_id_person_id_organization_id_fkey`), nada guardado |
+| `record*` con una cuenta de canal de otra organización, una que no existe, o con un `channel` distinto del tipo de la cuenta | `DataIntegrityViolationException` (`messages_channel_account_id_organization_id_channel_fkey`, V7, P-045), nada guardado |
 | `applyStatus` con un estado de rango mayor al actual | `ADVANCED`; el estado cambia al confirmar |
 | `applyStatus` con el mismo estado o uno de rango menor | `UNCHANGED`, sin cambios |
 | `applyStatus` de un mensaje que no está (otra cuenta, otra organización o sin organización) | `UNKNOWN_MESSAGE`, sin cambios; el reporte se descarta |
@@ -116,17 +119,19 @@ Quien llama a `recordReceived` o `recordSent`:
    PostgreSQL una violación aborta la transacción en curso, y la relectura del duplicado necesita una transacción
    limpia.
 2. **Tiene organización activa**: `currentOrganization.callAs(organizationId, ...)` o un request con operador
-   autenticado. #9/#10 tienen que ligar la organización (resuelta desde la cuenta de canal) **antes** de llamar. Sin
-   organización, el resolver devuelve el centinela `UUID(0, 0)` (`OrganizationTenantResolver.java:13`, `:23`):
-   registrar falla por la FK de `organization_id` y `applyStatus` devuelve `UNKNOWN_MESSAGE`, porque la búsqueda filtra
-   por el centinela.
+   autenticado. #10 tiene que ligar la organización (resuelta desde la cuenta de canal con
+   `ChannelAccountDirectory.resolve`, `docs/canales.md`) **antes** de llamar. Sin organización, el resolver devuelve el
+   centinela `UUID(0, 0)` (`OrganizationTenantResolver.java:13`, `:23`): registrar falla por la FK de
+   `organization_id` y `applyStatus` devuelve `UNKNOWN_MESSAGE`, porque la búsqueda filtra por el centinela.
 3. **Pasa una persona y una oportunidad coherentes**: la persona de `PersonDirectory.resolveOrCreate` y la oportunidad
    que devolvió `OpportunityTracker.recordActivity` para esa persona. La base rechaza una oportunidad de otra persona u
    organización, pero no controla que esté abierta.
 4. **Pasa un `externalId` único por cuenta de canal** (contrato del puerto, P-042). Si el id del proveedor solo es
    único dentro de un chat, el adaptador lo compone: por ejemplo, Telegram `chatId:messageId`.
-5. **Pasa el canal de la cuenta.** `channel` repite el tipo de la `ChannelAccount` y hoy nada controla que coincidan
-   (P-039); lo valida #9.
+5. **Pasa una cuenta de canal de la organización activa y su canal.** `channel` repite el tipo de la
+   `ChannelAccount`, y desde #42 la base controla que coincidan: la FK de tres columnas
+   `messages_channel_account_id_organization_id_channel_fkey` rechaza una cuenta que no existe, de otra organización o
+   de otro tipo (P-045). #10 pasa `account.channelType()` de la cuenta que resolvió (`docs/canales.md`).
 
 `applyStatus` es `@Transactional` con la propagación por defecto: si el llamador tiene una transacción, se une a ella
 y el lock de la fila dura hasta que esa transacción termine. `isRecorded` es `@Transactional(readOnly = true)`: su
@@ -308,8 +313,8 @@ sequenceDiagram
    `organization_id` y el `flush` hace que una violación salga ahí mismo como `DataIntegrityViolationException`.
 3. Si el `INSERT` choca, la transacción ya se deshizo entera y relee con la misma consulta sin transacción
    (`Timeline.java:71-75`). Con READ COMMITTED ve el mensaje que confirmó la otra transacción y devuelve
-   `RecordedMessage(id del ganador, true)`. Si no hay nada, la violación no era una carrera (FK de persona u
-   oportunidad, sin organización) y relanza la excepción original.
+   `RecordedMessage(id del ganador, true)`. Si no hay nada, la violación no era una carrera (FK de persona,
+   oportunidad o cuenta de canal, sin organización) y relanza la excepción original.
 
 ### Estado (`Timeline.applyStatus`)
 
@@ -319,7 +324,7 @@ sequenceDiagram
    que `isRecorded` (`Timeline.java:49`), y el estado con `Objects.requireNonNull` (`Timeline.java:39`).
 2. Trae el mensaje con `lockByChannelAccountIdAndExternalId` con `@Lock(PESSIMISTIC_WRITE)`
    (`MessageRepository.java:17-20`), que en PostgreSQL Hibernate traduce a `FOR NO KEY UPDATE` (es lo que espera
-   `MessagingFixture.anotherSessionIsWaitingToLockTheMessage`, `MessagingFixture.java:111-113`). `@TenantId` agrega el
+   `MessagingFixture.anotherSessionIsWaitingToLockTheMessage`, `MessagingFixture.java:121-123`). `@TenantId` agrega el
    filtro por organización.
 3. Si no está, `UNKNOWN_MESSAGE`. Si está, `advanceTo` decide (`Message.java:87-94`) y devuelve `ADVANCED` o
    `UNCHANGED` (`Timeline.java:40-44`). El cambio lo guarda el dirty checking al confirmar; no hay `UPDATE` masivo.
@@ -337,9 +342,10 @@ sequenceDiagram
   `applyStatus` se une a la transacción del llamador, varios reportes aplicados en una misma transacción acumulan locks
   hasta el commit, y dos de esas transacciones que tomen mensajes en distinto orden pueden trabarse (deadlock, que
   PostgreSQL resuelve abortando una).
-- **Registro frente a oportunidades**: el `INSERT` en `messages` toma `FOR KEY SHARE` sobre la fila de la oportunidad y
-  la de la persona (chequeo de las FK). Es compatible con el `FOR NO KEY UPDATE` de `recordActivity` y del job de cierre
-  (`docs/oportunidades.md`, «La oportunidad vigente»): registrar un mensaje no espera a esos locks ni ellos al registro.
+- **Registro frente a oportunidades**: el `INSERT` en `messages` toma `FOR KEY SHARE` sobre la fila de la oportunidad,
+  la de la persona y, desde V7, la de la cuenta de canal (chequeo de las FK). Es compatible con el `FOR NO KEY UPDATE`
+  de `recordActivity` y del job de cierre (`docs/oportunidades.md`, «La oportunidad vigente»): registrar un mensaje no
+  espera a esos locks ni ellos al registro.
 - **Estado frente a registro**: un reporte que llega antes de que el mensaje esté registrado devuelve
   `UNKNOWN_MESSAGE` y se pierde (ver «Riesgos»).
 
@@ -401,8 +407,11 @@ Restricciones:
   pero esta no depende de eso.
 - `messages_organization_id_fkey` (implícita, `V6__create_messages.sql:6`) es la que rechaza registrar sin
   organización (centinela).
-- `channel_account_id` no tiene FK: la tabla `channel_accounts` llega con #9, que agrega la FK
-  `(channel_account_id, organization_id)` (P-039).
+- `channel_account_id` no tiene FK en V6 (P-039). La agrega V7 (#42, P-045):
+  `messages_channel_account_id_organization_id_channel_fkey`, de tres columnas `(channel_account_id, organization_id,
+  channel) → channel_accounts (id, organization_id, channel_type)` (`V7__create_channel_accounts.sql:14-17`). Garantiza
+  que la cuenta exista, sea de la misma organización y tenga el tipo de `channel`. Es `NO ACTION`: una cuenta con
+  mensajes no se puede borrar. Detalle en `docs/canales.md`, «Esquema».
 - `channel`, `sender_type` y `status` son `TEXT` sin `CHECK` de valores, como `operators.role`.
 
 Índices y las consultas que sirven (Hibernate agrega `organization_id = ?` por `@TenantId` a toda consulta de la
@@ -410,7 +419,7 @@ entidad):
 
 | Índice | Consulta |
 |---|---|
-| `messages_organization_id_channel_account_id_external_id_key` (el `UNIQUE`, `V6__create_messages.sql:22-23`) | La idempotencia, y las dos búsquedas por cuenta + `externalId` de `MessageRepository` (`WHERE organization_id = ? AND channel_account_id = ? AND external_id = ?`): la del duplicado y la de `applyStatus`. Va a servir también a la FK `(channel_account_id, organization_id)` de #9. Como empieza por `organization_id`, no hace falta un índice aparte por organización (`.claude/rules/flyway.md`). |
+| `messages_organization_id_channel_account_id_external_id_key` (el `UNIQUE`, `V6__create_messages.sql:22-23`) | La idempotencia, y las dos búsquedas por cuenta + `externalId` de `MessageRepository` (`WHERE organization_id = ? AND channel_account_id = ? AND external_id = ?`): la del duplicado y la de `applyStatus`. También sirve al lado de `messages` de la FK a `channel_accounts` de V7 (los chequeos al borrar una cuenta o cambiarle la clave buscan por `organization_id` y `channel_account_id`, el prefijo del índice). Como empieza por `organization_id`, no hace falta un índice aparte por organización (`.claude/rules/flyway.md`). |
 | `messages_person_id_occurred_at_recorded_at_id_idx` (`V6__create_messages.sql:26-27`) | La línea de tiempo de una persona (#15): `WHERE person_id = ? ORDER BY occurred_at DESC, recorded_at DESC, id DESC`, con paginación. Por empezar en `person_id`, también sirve al chequeo de la FK a `people`. |
 | `messages_person_id_channel_account_id_occurred_at_customer_idx` (parcial, `V6__create_messages.sql:28-29`) | La ventana de conversación (#12): el último mensaje del cliente en una cuenta, `WHERE person_id = ? AND channel_account_id = ? AND sender_type = 'CUSTOMER' ORDER BY occurred_at DESC LIMIT 1`. El planner usa un índice parcial solo si puede probar el predicado, así que `sender_type = 'CUSTOMER'` va como literal, no como parámetro. |
 | `messages_opportunity_id_idx` (`V6__create_messages.sql:30`) | El lado de `messages` de la FK `messages_opportunity_id_person_id_organization_id_fkey` (los chequeos al borrar una oportunidad o cambiar su clave, por ejemplo en una fusión de personas, buscan `WHERE opportunity_id = ? AND person_id = ? AND organization_id = ?`) y las consultas por oportunidad (métricas, #15). Alcanza con `opportunity_id`: es la clave primaria de `opportunities`, así que ya identifica una sola oportunidad, y `person_id` y `organization_id` no achican el resultado; sumarlos solo agranda el índice. |
@@ -452,8 +461,10 @@ Testcontainers, sin `@Transactional`; reloj fijo en `MutableClock.INITIAL_INSTAN
 Cada test crea sus organizaciones y llama con `callAs` (`receiveIn`, `sendIn`, `applyStatusIn`, `isRecordedIn`). Las
 filas se leen con `MessagingFixture` (`JdbcTemplate`), que compara la fila entera (`StoredMessage`), filtrando por
 `organization_id` salvo `messagesInAnyOrganizationWithExternalId`, que cuenta en todas. La persona sale de
-`PersonDirectory`, la oportunidad de `OpportunityTracker.recordActivity` y la cuenta de canal es un `UUID` al azar
-(`MessagingFixture.channelAccount`, `MessagingFixture.java:61-63`). 19 métodos, 24 ejecuciones con los parametrizados.
+`PersonDirectory`, la oportunidad de `OpportunityTracker.recordActivity` y la cuenta de canal es una fila real de
+`channel_accounts` que `MessagingFixture.channelAccount` inserta por SQL, de tipo `WHATSAPP` salvo que se le pase otro
+(`MessagingFixture.java:61-73`; desde #42, sin depender de clases de `channels`). 24 métodos, 27 ejecuciones con los
+parametrizados (antes de #42 eran 21 y 24).
 
 | Test | Qué cubre |
 |---|---|
@@ -475,6 +486,9 @@ filas se leen con `MessagingFixture` (`JdbcTemplate`), que compara la fila enter
 | `messageOfAPersonOfAnotherOrganizationIsRejected` | Persona de Globex en un mensaje de Acme: `DataIntegrityViolationException` y ninguna fila con ese `externalId` en ninguna organización. |
 | `messageCannotPointToAnOpportunityOfAnotherOrganization` | Oportunidad de Globex en un mensaje de Acme: `DataIntegrityViolationException` (FK de tres columnas) y ninguna fila. |
 | `messageCannotPointToAnOpportunityOfAnotherPerson` | Oportunidad de otra persona de Acme: `DataIntegrityViolationException`, ninguna fila, y la salida nombra `messages_opportunity_id_person_id_organization_id_fkey`. |
+| `messageCannotPointToAChannelAccountOfAnotherOrganization` | (#42) Cuenta de canal de Globex en un mensaje de Acme: `DataIntegrityViolationException`, ninguna fila en Acme ni en Globex ni con ese `externalId`, y la salida nombra `messages_channel_account_id_organization_id_channel_fkey`. |
+| `messageCannotPointToAnUnknownChannelAccount` | (#42) Cuenta de canal inexistente (`UUID` al azar): `DataIntegrityViolationException`, ninguna fila, y la salida nombra la misma FK. |
+| `messageOnAChannelOtherThanItsAccountTypeIsRejected` | (#42) Mensaje `WHATSAPP` en una cuenta `TELEGRAM` de Acme: `DataIntegrityViolationException`, ninguna fila, y la salida nombra la misma FK. |
 | `messageCannotBeRecordedWithoutOrganization` | Sin ámbito ni usuario: `DataIntegrityViolationException` y ninguna fila en ninguna organización. |
 | `messageCannotBeRecordedInsideAnOpenTransactionalScope` | Parametrizado con `Propagation.REQUIRED` (transacción real) y `Propagation.SUPPORTS` (ámbito sin transacción): `IllegalStateException` y nada guardado. |
 | `receivedMessageWithoutExternalIdLeavesNothingInTheTimeline` | `recordReceived` con `externalId` en blanco da `IllegalArgumentException` y no deja filas en la organización: la validación corre antes de tocar la base. Las demás combinaciones las cubre `MessageTest.receivedMessageWithoutExternalIdOrTextIsRejected`. |
@@ -495,8 +509,8 @@ Comando: `./mvnw test -Dtest='MessageTest,TimelineTest'` desde `backend/` (skill
   mensaje: hace falta una operación aparte, que `applyStatus` no cubre.
 - **Saliente proactivo sin oportunidad abierta**: `opportunity_id` es `NOT NULL` (D-001). #12 tiene que resolver qué
   oportunidad usa un mensaje que la organización inicia (por ejemplo, abrir una o usar la última).
-- **`channel` duplica el tipo de la `ChannelAccount`** y nada controla que coincidan (P-039). #9 lo valida en el
-  pipeline o con una FK que incluya el tipo.
+- **`channel` duplica el tipo de la `ChannelAccount`**. Cerrado por P-045 (#42): la FK de tres columnas de V7 rechaza
+  un mensaje cuyo `channel` no coincide con el tipo de su cuenta.
 - **La FK no controla que la oportunidad esté abierta**: garantiza que sea de la misma persona y organización, pero el
   llamador tiene que pasar la que devolvió `recordActivity`.
 - **Gana la primera escritura**: un duplicado con contenido distinto (un proveedor que reenvía editado) conserva el
@@ -538,17 +552,17 @@ Comando: `./mvnw test -Dtest='MessageTest,TimelineTest'` desde `backend/` (skill
   obliga a resolver la oportunidad de otra forma, porque `ReceivedMessage` la necesita) o aceptar la consulta extra,
   que es barata (búsqueda por índice único).
 
-## Pendiente: #9, #10, #12, #15
+## Pendiente: #43, #10, #12, #15
 
-- **#9 (canales y cuentas)**: crea `channel_accounts` con `UNIQUE (id, organization_id)` y agrega en V7 la FK
-  `(channel_account_id, organization_id)` de `messages`. La rama de #9 se apila sobre la de #8 (V7 depende de V6).
-  Tiene que cambiar `MessagingFixture.channelAccount` (`MessagingFixture.java:61-63`), que hoy devuelve un `UUID` al
-  azar, para que cree una cuenta real; validar que `channel` coincida con el tipo de la cuenta; agregar `SANDBOX` a
-  `ChannelType` si lo necesita; y garantizar que el adaptador entregue un `externalId` único por cuenta (Telegram:
-  `chatId:messageId`).
-- **#9 y #10**: ligar la organización de la cuenta de canal con `currentOrganization.callAs` **antes** de llamar a
-  `Timeline`. Sin organización, registrar falla por `messages_organization_id_fkey` y `applyStatus` devuelve
-  `UNKNOWN_MESSAGE` en silencio.
+- **#9 (canales y cuentas)**: hecho en #42 (`docs/canales.md`), con la rama apilada sobre la de #8: V7 crea
+  `channel_accounts` y la FK de tres columnas `(channel_account_id, organization_id, channel)` de `messages`, que
+  además controla que `channel` coincida con el tipo de la cuenta (P-045, en lugar de la FK de dos columnas de P-039);
+  `MessagingFixture.channelAccount` crea una cuenta real. Queda para #43: agregar `SANDBOX` a `ChannelType` y
+  garantizar que el adaptador entregue un `externalId` único por cuenta (Telegram: `chatId:messageId`).
+- **#10**: resolver la cuenta con `ChannelAccountDirectory.resolve` y ligar su organización con
+  `currentOrganization.runAs(account.organizationId(), ...)` **antes** de llamar a `Timeline`, pasando
+  `account.channelType()` como canal. Sin organización, registrar falla por `messages_organization_id_fkey` y
+  `applyStatus` devuelve `UNKNOWN_MESSAGE` en silencio.
 - **#10 (flujo entrante)**: vive en `channels` (o en un módulo por encima), no en `messaging`. Descarta el reenvío con
   `isRecorded` antes de `recordActivity`, registra con `recordReceived` y publica «mensaje recibido» solo si
   `RecordedMessage.duplicate` es `false`. Decide si acepta el `SELECT` repetido de un mensaje nuevo o se apoya solo en

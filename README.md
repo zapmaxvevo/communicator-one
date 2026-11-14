@@ -9,6 +9,7 @@ Centraliza todas las comunicaciones con prospectos y clientes (WhatsApp, Instagr
 - [Personas e identidades de contacto](docs/personas.md)
 - [Oportunidades](docs/oportunidades.md)
 - [Mensajes y línea de tiempo](docs/mensajes.md)
+- [Canales y cuentas de canal](docs/canales.md)
 - [Backlog](docs/backlog.md)
 
 Stack: Java + Spring Boot (backend), React + TypeScript (web). Arquitectura API primero.

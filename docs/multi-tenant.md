@@ -21,7 +21,8 @@ La organización activa la resuelve `CurrentOrganization`, en este orden:
 
 Se activa sola: cualquier sesión de Hibernate que se abra consulta al resolver. Todavía no hay endpoints ni alta de
 organizaciones; la primera entidad de negocio es `Operator` (#5), y después vienen `Person` y `PersonIdentity` (#6,
-`docs/personas.md`) y `Opportunity` y `OpportunitySettings` (#36, `docs/oportunidades.md`).
+`docs/personas.md`), `Opportunity` y `OpportunitySettings` (#36, `docs/oportunidades.md`), `Message` (#8,
+`docs/mensajes.md`) y `ChannelAccount` (#42, `docs/canales.md`).
 
 ## Piezas
 
@@ -157,7 +158,7 @@ job que se olvida el `runAs` no falla al leer, ve vacío.
 
 SQL nativo y `JdbcTemplate` van directo a la base: filtran por `organization_id` a mano. Los `UPDATE`/`DELETE`
 masivos por JPQL no están verificados por ningún test: hasta que lo estén, no dar por hecho que se filtran. Las
-búsquedas que tienen que cruzar organizaciones a propósito se deciden en su tarea. Hay dos, y las dos devuelven solo
+búsquedas que tienen que cruzar organizaciones a propósito se deciden en su tarea. Hay tres, y las tres devuelven solo
 ids de organización:
 
 - **El operador por email en el login** (#5, P-022): `OperatorEmailDirectory` devuelve solo el `organization_id` y el
@@ -167,8 +168,10 @@ ids de organización:
   organization_id`) y, por cada una, hace `runAs(organizationId, ...)` y llama a un servicio `@Transactional` que lee
   con el filtro de `@TenantId` de siempre. Si una organización falla, se loguea y sigue con la siguiente
   (`docs/oportunidades.md`).
-
-Falta la `ChannelAccount` de un webhook (#9).
+- **La cuenta de canal de un webhook** (#42, P-044): `ChannelAccountDirectory.resolve` busca con `JdbcTemplate`
+  (`SELECT organization_id FROM channel_accounts WHERE channel_type = ? AND external_account_id = ?`) y carga la cuenta
+  con `callAs` y la consulta derivada filtrada. El pipeline entrante (#10) la llama fuera de transacción y después abre
+  `runAs(account.organizationId(), ...)` (`docs/canales.md`).
 
 ## Ejemplos
 
