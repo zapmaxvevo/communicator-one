@@ -36,7 +36,7 @@ mismo módulo (P-043).
 |---|---|---|
 | `ChannelAccount` | package-private | Entidad de la tabla `channel_accounts` (`ChannelAccount.java:16-18`): `id`, `@TenantId organizationId` (`ChannelAccount.java:24-26`), `channelType` guardado por nombre, `externalAccountId`, `displayName` y `allowsOutbound`. Fábrica `register(channelType, externalAccountId, displayName, allowsOutbound)` (`ChannelAccount.java:48-54`), que exige tipo y nombre visible y normaliza el id con `normalizedExternalAccountId` (`strip`, `ChannelAccount.java:56-59`). Accesores `id()`, `organizationId()`, `channelType()` y `allowsOutbound()` (`ChannelAccount.java:61-75`). Sin setters, sin accesor de `displayName` (nadie lo lee todavía) y sin `toString` propio. |
 | `ChannelAccountRepository` | package-private | `JpaRepository<ChannelAccount, UUID>` con la consulta derivada `findByChannelTypeAndExternalAccountId` (`ChannelAccountRepository.java:8-10`), filtrada por `@TenantId` como toda consulta derivada. |
-| `ChannelAccountDirectory` | package-private | `@Component` con `resolve(ChannelType, String): Optional<ChannelAccount>` (`ChannelAccountDirectory.java:25-31`). Primero busca la organización con `JdbcTemplate` (el privado `organizationOf`, `ChannelAccountDirectory.java:33-39`) y después carga la cuenta con `callAs` y la consulta filtrada. Recibe `JdbcTemplate`, `CurrentOrganization` y el repositorio en el constructor package-private (`ChannelAccountDirectory.java:18-23`). Sin `@Transactional`. |
+| `ChannelAccountDirectory` | package-private | `@Component` con `resolve(ChannelType, String): Optional<ChannelAccount>` (`ChannelAccountDirectory.java:26-34`). Al entrar rechaza la sincronización de transacción activa (`ChannelAccountDirectory.java:27-28`, como `PersonDirectory.resolveOrCreate`, P-029); después busca la organización con `JdbcTemplate` (el privado `organizationOf`, `ChannelAccountDirectory.java:36-42`) y carga la cuenta con `callAs` y la consulta filtrada. Recibe `JdbcTemplate`, `CurrentOrganization` y el repositorio en el constructor package-private (`ChannelAccountDirectory.java:19-24`). Sin `@Transactional`. |
 
 El `package-info.java` con `@ApplicationModule` ya existía desde el scaffold y `ModularStructureTest` ya declaraba
 `channels`. #42 suma la migración V7 (ver «Esquema»), que además agrega una restricción a `messages`.
@@ -54,19 +54,23 @@ Optional<ChannelAccount> account = directory.resolve(ChannelType.WHATSAPP, "1065
 | El id con espacios alrededor (`" 106540352242922  "`) | La misma cuenta: se recorta con la misma función que al registrar |
 | Un id que no está registrado para ese tipo (aunque exista en otro tipo) | `Optional.empty()` |
 | El mismo id con otro tipo de canal | La cuenta de ese tipo, si existe: `WHATSAPP "777"` y `TELEGRAM "777"` son dos cuentas |
-| Tipo nulo | `IllegalArgumentException` («A channel account is resolved by its channel type») |
-| Id nulo, vacío o en blanco | `IllegalArgumentException` («A channel account needs the id its provider gave it») |
-| Llamado con una transacción o una sesión de JPA abierta, y la cuenta existe | `IllegalStateException` de `callAs` («The organization cannot be switched inside a transaction or open session») |
-| Llamado con una transacción o una sesión de JPA abierta, y la cuenta no existe | `Optional.empty()`: el `callAs` no llega a ejecutarse |
+| Tipo nulo, fuera de transacción | `IllegalArgumentException` («A channel account is resolved by its channel type») |
+| Id nulo, vacío o en blanco, fuera de transacción | `IllegalArgumentException` («A channel account needs the id its provider gave it») |
+| Cualquier entrada (cuenta existente, id desconocido o argumentos inválidos) con sincronización de transacción activa: dentro de una transacción o de un ámbito `SUPPORTS` | `IllegalStateException` («A channel account is resolved outside of a transaction, not inside an open one»), antes de validar argumentos y sin consultar la base |
+| Sin sincronización de transacción pero con una sesión de JPA ligada al hilo (OSIV, `SYNCHRONIZATION_NEVER`, `EntityManager` ligado a mano), y la cuenta existe | `IllegalStateException` de `callAs` («The organization cannot be switched inside a transaction or open session»). Sin test propio en `ChannelAccountDirectoryTest` |
+| Lo mismo, con un id desconocido | `Optional.empty()`: el chequeo de entrada no mira la sesión y el `callAs` no llega a ejecutarse |
 
 Quien llama a `resolve`:
 
 1. **No tiene una transacción ni una sesión de JPA abierta.** `resolve` no es `@Transactional` porque el segundo paso
    es un `callAs`, que lanza `IllegalStateException` si hay sincronización de transacción activa o una sesión ligada
    al hilo (`CurrentOrganization.java:32-38`, `:47-50`). Es el mismo motivo por el que `OperatorAuthentication.signIn`
-   no es transaccional (P-022). La excepción solo aparece si la cuenta existe: con un id desconocido el primer paso
-   devuelve vacío y el `callAs` nunca corre. Un test que solo pruebe ids desconocidos dentro de una transacción no lo
-   va a detectar.
+   no es transaccional (P-022). Para que el error no dependa de que la cuenta exista, `resolve` comprueba al entrar
+   `TransactionSynchronizationManager.isSynchronizationActive()` con `Assert.state`
+   (`ChannelAccountDirectory.java:27-28`), igual que `PersonDirectory.resolveOrCreate` (P-029): llamado dentro de una
+   transacción o de un ámbito `SUPPORTS`, falla siempre, también con un id desconocido. Ese chequeo no mira la sesión
+   ligada al hilo sin sincronización (OSIV, que la app tiene apagado): ese caso lo sigue frenando `callAs`, solo si la
+   cuenta existe.
 2. **Trata el `Optional.empty()` como «webhook para una cuenta que no conocemos»**: no hay organización a la que
    asignarlo. Qué responde al proveedor lo decide #10.
 3. **Después abre el ámbito de la organización de la cuenta** y pasa el tipo de la cuenta como canal del mensaje:
@@ -91,17 +95,19 @@ después.
 
 ## Diagramas
 
-Resolución en dos pasos (`ChannelAccountDirectory.java:25-39`):
+Chequeo de entrada y resolución en dos pasos (`ChannelAccountDirectory.java:26-42`):
 
 ```mermaid
 flowchart TD
-    R["resolve(channelType, externalAccountId)"] --> V{tipo nulo, o id<br/>nulo o en blanco?}
+    R["resolve(channelType, externalAccountId)"] --> T{sincronización de<br/>transacción activa?}
+    T -->|sí| X0[IllegalStateException<br/>resolved outside of a transaction]
+    T -->|no| V{tipo nulo, o id<br/>nulo o en blanco?}
     V -->|sí| X1[IllegalArgumentException]
     V -->|no| N["normalizedExternalAccountId<br/>(strip)"]
     N --> J["Paso 1, JdbcTemplate, sin organización:<br/>SELECT organization_id FROM channel_accounts<br/>WHERE channel_type = ? AND external_account_id = ?"]
     J -->|ninguna fila| E[Optional.empty]
-    J -->|organization_id| S{transacción o<br/>sesión abierta?}
-    S -->|sí| X2[IllegalStateException]
+    J -->|organization_id| S{sesión de JPA<br/>ligada al hilo?}
+    S -->|sí| X2[IllegalStateException<br/>de callAs]
     S -->|no| C["Paso 2, callAs(organizationId):<br/>findByChannelTypeAndExternalAccountId<br/>filtrada por @TenantId"]
     C --> OK[Optional con la cuenta desprendida]
 ```
@@ -143,13 +149,16 @@ Ejemplo: `register(WHATSAPP, "  106540352242922 ", "Ventas", true)` guarda `exte
 
 ### Resolución (`ChannelAccountDirectory.resolve`)
 
-1. Valida el tipo (`ChannelAccountDirectory.java:26`) y normaliza el id con la misma función que el registro
-   (`ChannelAccountDirectory.java:27`), así que un payload con espacios encuentra la cuenta.
-2. **Paso 1** (`ChannelAccountDirectory.java:33-39`): `JdbcTemplate` con `SELECT organization_id FROM channel_accounts
+1. Rechaza la sincronización de transacción activa con `Assert.state` («A channel account is resolved outside of a
+   transaction, not inside an open one», `ChannelAccountDirectory.java:27-28`). Va primero: dentro de una transacción
+   hasta una llamada con argumentos inválidos da `IllegalStateException`.
+2. Valida el tipo (`ChannelAccountDirectory.java:29`) y normaliza el id con la misma función que el registro
+   (`ChannelAccountDirectory.java:30`), así que un payload con espacios encuentra la cuenta.
+3. **Paso 1** (`ChannelAccountDirectory.java:36-42`): `JdbcTemplate` con `SELECT organization_id FROM channel_accounts
    WHERE channel_type = ? AND external_account_id = ?`. Es la tercera consulta del sistema que cruza organizaciones a
    propósito, después de la del login (P-022) y la del job de cierre (P-037), y como ellas devuelve solo el id de la
    organización (`docs/multi-tenant.md`, `.claude/rules/java.md`). Por el `UNIQUE` global devuelve como mucho una fila.
-3. **Paso 2** (`ChannelAccountDirectory.java:28-30`): con esa organización abre `currentOrganization.callAs` y carga
+4. **Paso 2** (`ChannelAccountDirectory.java:31-33`): con esa organización abre `currentOrganization.callAs` y carga
    la cuenta con la consulta derivada, que Hibernate filtra por `@TenantId` como cualquier otra lectura.
 
 Son dos consultas por webhook, las dos sobre el índice único. Se descartó una sola consulta nativa que devuelva la
@@ -257,8 +266,8 @@ Un segundo `INSERT` con el mismo `channel_type` y `external_account_id` falla po
 `RANDOM_PORT` + Testcontainers, sin `@Transactional`). Cada test crea sus organizaciones con `ChannelsFixture`, que
 registra cuentas con `callAs` + `ChannelAccount.register` (nombre «Ventas») y compara con el record
 `ChannelsFixture.RegisteredAccount(id, organizationId, channelType, allowsOutbound)`. Como la base es compartida y el
-`UNIQUE` es global, los ids externos llevan un sufijo al azar (`ChannelsFixture.externalAccountId(prefix)`). 8 métodos,
-10 ejecuciones con los parametrizados.
+`UNIQUE` es global, los ids externos llevan un sufijo al azar (`ChannelsFixture.externalAccountId(prefix)`). 9 métodos,
+12 ejecuciones con los parametrizados.
 
 | Test | Qué cubre |
 |---|---|
@@ -270,6 +279,7 @@ registra cuentas con `callAs` + `ChannelAccount.register` (nombre «Ventas») y 
 | `accountRegisteredWithSurroundingSpacesResolvesByItsTrimmedId` | Registrada con espacios alrededor: la resuelven el id recortado y el id con otros espacios. |
 | `resolutionIgnoresAnotherActiveOrganization` | `resolve` dentro de `callAs(globex)` devuelve la cuenta de Acme. |
 | `resolvingWithoutChannelTypeOrExternalAccountIdIsRejected` | Parametrizado: `(null, "123")`, `(WHATSAPP, null)` y `(WHATSAPP, "  ")` dan `IllegalArgumentException` con su mensaje. |
+| `channelAccountCannotBeResolvedInsideAnOpenTransactionalScope` | Parametrizado con `Propagation.REQUIRED` (transacción real) y `Propagation.SUPPORTS` (ámbito sin transacción): `resolve` de un id `WHATSAPP` que no está registrado da `IllegalStateException` con el mensaje exacto. Usa un id desconocido a propósito: así prueba que el chequeo es al entrar y no depende de llegar al `callAs`. |
 
 `backend/src/test/java/com/communicatorone/messaging/TimelineTest.java` suma tres tests de la FK nueva (detalle en
 `docs/mensajes.md`, «Tests»): `messageCannotPointToAChannelAccountOfAnotherOrganization`,
@@ -282,8 +292,9 @@ depender de clases de `channels`.
 `TenantIsolationTest.everyBusinessEntityBelongsToAnOrganization` cubre que `ChannelAccount` lleve `@TenantId`, y
 `ModularStructureTest` que `channels` no use internos de `messaging` ni de `organizations`.
 
-No hay test de `resolve` llamado dentro de una transacción (el contrato del punto 1 de «Contrato de `resolve`» sale de
-`CurrentOrganization`, que ya tiene sus tests en `TenantIsolationTest`).
+El caso de una sesión de JPA ligada al hilo sin sincronización de transacción (OSIV) no tiene test en
+`ChannelAccountDirectoryTest`: lo frena `callAs`, probado en
+`TenantIsolationTest.organizationCannotBeSwitchedWhileASessionIsOpen`.
 
 Comando: `./mvnw test -Dtest='ChannelAccount*Test,TimelineTest'` desde `backend/` (skill `run-tests`).
 

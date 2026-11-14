@@ -13,12 +13,15 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestConstructor;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(TestcontainersConfiguration.class)
@@ -27,17 +30,22 @@ class ChannelAccountDirectoryTest {
 
     private static final String MISSING_TYPE = "A channel account is resolved by its channel type";
     private static final String MISSING_EXTERNAL_ID = "A channel account needs the id its provider gave it";
+    private static final String INSIDE_TRANSACTION =
+            "A channel account is resolved outside of a transaction, not inside an open one";
 
     private final ChannelAccountDirectory directory;
     private final ChannelAccountRepository accounts;
     private final CurrentOrganization currentOrganization;
+    private final TransactionTemplate transactionTemplate;
     private final ChannelsFixture fixture;
 
     ChannelAccountDirectoryTest(ChannelAccountDirectory directory, ChannelAccountRepository accounts,
-            CurrentOrganization currentOrganization, JdbcTemplate jdbcTemplate) {
+            CurrentOrganization currentOrganization, JdbcTemplate jdbcTemplate,
+            TransactionTemplate transactionTemplate) {
         this.directory = directory;
         this.accounts = accounts;
         this.currentOrganization = currentOrganization;
+        this.transactionTemplate = transactionTemplate;
         this.fixture = new ChannelsFixture(jdbcTemplate, currentOrganization, accounts);
     }
 
@@ -120,9 +128,9 @@ class ChannelAccountDirectoryTest {
 
         // When
         var byIdFromGlobex = findById(globex, acmeAccount.id());
-        var byExternalIdFromGlobex = findByExternalId(globex, externalId);
+        var byExternalIdFromGlobex = findByExternalId(globex, ChannelType.WHATSAPP, externalId);
         var byIdFromAcme = findById(acme, acmeAccount.id());
-        var byExternalIdFromAcme = findByExternalId(acme, externalId);
+        var byExternalIdFromAcme = findByExternalId(acme, ChannelType.WHATSAPP, externalId);
 
         // Then
         assertThat(byIdFromGlobex).isEmpty();
@@ -180,6 +188,22 @@ class ChannelAccountDirectoryTest {
                 Arguments.of("blank external id", ChannelType.WHATSAPP, "  ", MISSING_EXTERNAL_ID));
     }
 
+    @ParameterizedTest
+    @EnumSource(value = Propagation.class, names = {"REQUIRED", "SUPPORTS"})
+    void channelAccountCannotBeResolvedInsideAnOpenTransactionalScope(Propagation propagation) {
+        // Given
+        var unknownExternalId = fixture.externalAccountId("999888777");
+        var scope = new TransactionTemplate(transactionTemplate.getTransactionManager());
+        scope.setPropagationBehavior(propagation.value());
+
+        // When
+        var rejection = catchThrowable(() -> scope.executeWithoutResult(
+                status -> directory.resolve(ChannelType.WHATSAPP, unknownExternalId)));
+
+        // Then
+        assertThat(rejection).isInstanceOf(IllegalStateException.class).hasMessage(INSIDE_TRANSACTION);
+    }
+
     private Optional<RegisteredAccount> resolve(ChannelType channelType, String externalAccountId) {
         return directory.resolve(channelType, externalAccountId).map(RegisteredAccount::of);
     }
@@ -188,9 +212,10 @@ class ChannelAccountDirectoryTest {
         return currentOrganization.callAs(organizationId, () -> accounts.findById(id).map(RegisteredAccount::of));
     }
 
-    private Optional<RegisteredAccount> findByExternalId(UUID organizationId, String externalId) {
+    private Optional<RegisteredAccount> findByExternalId(UUID organizationId, ChannelType channelType,
+            String externalId) {
         return currentOrganization.callAs(organizationId,
-                () -> accounts.findByChannelTypeAndExternalAccountId(ChannelType.WHATSAPP, externalId)
+                () -> accounts.findByChannelTypeAndExternalAccountId(channelType, externalId)
                         .map(RegisteredAccount::of));
     }
 }
