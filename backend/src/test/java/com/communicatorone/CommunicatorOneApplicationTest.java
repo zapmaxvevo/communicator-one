@@ -54,6 +54,7 @@ class CommunicatorOneApplicationTest {
     @ParameterizedTest
     @ValueSource(strings = {
             "/api/organizations",
+            "/api/me",
             "/v3/api-docs",
             "/swagger-ui/index.html",
             "/actuator",

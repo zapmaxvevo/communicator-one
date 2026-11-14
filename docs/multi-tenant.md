@@ -15,12 +15,12 @@ La organización activa la resuelve `CurrentOrganization`, en este orden:
 
 1. El ámbito explícito abierto con `runAs`/`callAs`, para procesos sin usuario (webhooks, jobs, listeners).
 2. El principal de la `Authentication` del `SecurityContextHolder`, si está autenticada y el principal implementa
-   `OrganizationMember`. Lo va a cargar el JWT del issue #5.
+   `OrganizationMember`. Lo carga el JWT desde el issue #5 (`AuthenticatedOperator`, ver `docs/autenticacion.md`).
 3. Ninguna: el resolver devuelve un centinela (`00000000-0000-0000-0000-000000000000`) que no es ninguna organización.
    Las lecturas vuelven vacías y las escrituras fallan por la FK a `organizations`.
 
-Se activa sola: cualquier sesión de Hibernate que se abra consulta al resolver. Todavía no hay entidades de negocio,
-endpoints ni alta de organizaciones; el módulo deja el mecanismo y el contrato para los que vienen.
+Se activa sola: cualquier sesión de Hibernate que se abra consulta al resolver. Todavía no hay endpoints ni alta de
+organizaciones; la primera entidad de negocio es `Operator` (#5).
 
 ## Piezas
 
@@ -62,7 +62,7 @@ sin setter, y su tabla lleva `organization_id UUID NOT NULL REFERENCES organizat
 
 Si el código necesita la organización de un registro (por ejemplo, para el `organizationId` de un evento de dominio),
 la saca del accesor de la propia entidad, cuyo valor asignó Hibernate al persistir, y no de `resolve()`, que es
-package-private. Todavía no hay una entidad con ese accesor: `IsolationProbe` no expone su `organizationId`.
+package-private. Por ejemplo, `Operator.organizationId()`, que usa `OperatorTokens` para el claim `organization_id`.
 
 ## Diagramas
 
@@ -138,8 +138,9 @@ Sin ámbito explícito, `CurrentOrganization.resolve` mira el `SecurityContextHo
 implementa `OrganizationMember`. Un token sin autenticar con el mismo principal no da organización. El ámbito explícito
 gana sobre el usuario: un usuario de Globex dentro de `runAs(acme, ...)` ve lo de Acme.
 
-Contrato para #5: después de validar el JWT, dejar en el contexto una `Authentication` autenticada cuyo principal
-implemente `OrganizationMember`.
+Contrato para #5, ya cumplido: después de validar el JWT, `OperatorTokens.convert` deja en el contexto una
+`Authentication` autenticada cuyo principal, `AuthenticatedOperator`, implementa `OrganizationMember`
+(`docs/autenticacion.md`).
 
 ### Sin organización
 
@@ -153,8 +154,9 @@ job que se olvida el `runAs` no falla al leer, ve vacío.
 
 SQL nativo y `JdbcTemplate` van directo a la base: filtran por `organization_id` a mano. Los `UPDATE`/`DELETE`
 masivos por JPQL no están verificados por ningún test: hasta que lo estén, no dar por hecho que se filtran. Las
-búsquedas que tienen que cruzar organizaciones a propósito (el operador por email en el login de #5, la
-`ChannelAccount` de un webhook en #9) se deciden en esas tareas.
+búsquedas que tienen que cruzar organizaciones a propósito se deciden en su tarea. La del operador por email en el
+login quedó resuelta en #5 (P-022): `OperatorEmailDirectory` devuelve solo el `organization_id` y el operador se carga
+con `callAs` y la lectura filtrada (`docs/autenticacion.md`). Falta la `ChannelAccount` de un webhook (#9).
 
 ## Ejemplos
 

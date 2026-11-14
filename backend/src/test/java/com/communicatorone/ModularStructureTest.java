@@ -9,7 +9,7 @@ import org.springframework.modulith.core.ApplicationModules;
 class ModularStructureTest {
 
     @Test
-    void applicationIsOrganizedInTheSevenDomainModules() {
+    void applicationIsOrganizedInTheEightDomainModules() {
         // Given
         var modules = ApplicationModules.of(CommunicatorOneApplication.class);
 
@@ -20,7 +20,8 @@ class ModularStructureTest {
 
         // Then
         assertThat(declaredModules).containsExactlyInAnyOrder(
-                "organizations", "people", "opportunities", "messaging", "channels", "assignment", "notifications");
+                "organizations", "operators", "people", "opportunities", "messaging", "channels", "assignment",
+                "notifications");
     }
 
     @Test
