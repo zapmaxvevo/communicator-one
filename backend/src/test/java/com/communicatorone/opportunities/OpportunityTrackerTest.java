@@ -124,6 +124,25 @@ class OpportunityTrackerTest {
     }
 
     @Test
+    void personReturningWithinTheReentryWindowReopensAnOpportunityAlreadyClosedForInactivity() {
+        // Given
+        var acme = fixture.organization("Acme");
+        var person = fixture.person(acme);
+        var closedOpportunity = recordIn(acme, person, "whatsapp");
+        fixture.closeWithoutResponse(acme, closedOpportunity, NOW.plus(DEFAULT_INACTIVITY_PERIOD));
+        var returnedAt = NOW.plus(DEFAULT_INACTIVITY_PERIOD).plus(Duration.ofDays(2));
+        clock.setTo(returnedAt);
+
+        // When
+        var opportunityId = recordIn(acme, person, "instagram");
+
+        // Then
+        assertThat(opportunityId).isEqualTo(closedOpportunity);
+        assertThat(fixture.opportunitiesOf(acme)).containsExactly(
+                open(closedOpportunity, person, "whatsapp", NOW, returnedAt));
+    }
+
+    @Test
     void personReturningAfterTheReentryWindowGetsANewOpportunity() {
         // Given
         var acme = fixture.organization("Acme");
@@ -183,6 +202,8 @@ class OpportunityTrackerTest {
 
         // Then
         assertThat(rejection).isInstanceOf(DataIntegrityViolationException.class);
+        assertThat(rejection.getSuppressed()).as("failure of the first attempt, kept by the retry")
+                .hasSize(1).hasOnlyElementsOfType(DataIntegrityViolationException.class);
         assertThat(fixture.opportunitiesOf(globex)).isEmpty();
         assertThat(fixture.opportunitiesInAnyOrganizationOf(acmePerson)).isZero();
         assertThat(output.getAll()).contains("opportunities_person_id_organization_id_fkey");
@@ -293,6 +314,35 @@ class OpportunityTrackerTest {
         assertThat(opportunityId).isEqualTo(rival.opportunityId());
         assertThat(fixture.opportunitiesOf(acme)).containsExactly(
                 open(rival.opportunityId(), person, "instagram", NOW, NOW));
+        assertThat(output.getAll()).contains("opportunities_person_id_open_key");
+    }
+
+    @Test
+    void concurrentActivitiesAfterTheReentryWindowOpenASingleNewOpportunity(CapturedOutput output)
+            throws Exception {
+        // Given
+        var acme = fixture.organization("Acme");
+        var person = fixture.person(acme);
+        var previousOpportunity = recordIn(acme, person, "whatsapp");
+        var previousClosedAt = NOW.plus(DEFAULT_INACTIVITY_PERIOD);
+        var returnedAt = previousClosedAt.plus(DEFAULT_REENTRY_WINDOW);
+        clock.setTo(returnedAt);
+        var rival = fixture.rivalStartsReplacingOpportunity(acme, person, previousOpportunity, previousClosedAt,
+                "instagram", returnedAt);
+
+        // When
+        var activity = CompletableFuture.supplyAsync(() -> recordIn(acme, person, "whatsapp"), background);
+        await().atMost(TIMEOUT)
+                .failFast(() -> assertThat(activity).as("activity waiting for the rival").isNotDone())
+                .until(fixture::anotherSessionIsWaitingToLockTheLatestOpportunity);
+        rival.commit();
+        var opportunityId = activity.get(TIMEOUT.toSeconds(), TimeUnit.SECONDS);
+
+        // Then
+        assertThat(opportunityId).isEqualTo(rival.opportunityId());
+        assertThat(fixture.opportunitiesOf(acme)).containsExactlyInAnyOrder(
+                open(previousOpportunity, person, "whatsapp", NOW, NOW).closedWithoutResponseAt(previousClosedAt),
+                open(rival.opportunityId(), person, "instagram", returnedAt, returnedAt));
         assertThat(output.getAll()).contains("opportunities_person_id_open_key");
     }
 

@@ -85,35 +85,72 @@ class OpportunitiesFixture {
                 personId);
     }
 
+    void closeWithoutResponse(UUID organizationId, UUID opportunityId, Instant closedAt) {
+        jdbcTemplate.update("""
+                UPDATE opportunities SET status = 'CLOSED', result = 'NO_RESPONSE', closed_at = ?
+                WHERE id = ? AND organization_id = ?
+                """, utc(closedAt), opportunityId, organizationId);
+    }
+
     RivalOpening rivalStartsOpeningOpportunity(UUID organizationId, UUID personId, String source)
             throws InterruptedException {
         var opportunityId = UUID.randomUUID();
-        var inserted = new CountDownLatch(1);
-        var release = new CountDownLatch(1);
-        var openedAt = OffsetDateTime.ofInstant(MutableClock.INITIAL_INSTANT, ZoneOffset.UTC);
-        var transaction = background.submit(() -> transactionTemplate.executeWithoutResult(status -> {
-            jdbcTemplate.update("""
-                    INSERT INTO opportunities (id, organization_id, person_id, source, status, opened_at,
-                        last_activity_at)
-                    VALUES (?, ?, ?, ?, 'OPEN', ?, ?)
-                    """, opportunityId, organizationId, personId, source, openedAt, openedAt);
-            inserted.countDown();
-            awaitRelease(release);
-        }));
-        assertThat(inserted.await(TIMEOUT.toSeconds(), TimeUnit.SECONDS)).as("rival inserted its opportunity")
-                .isTrue();
-        return new RivalOpening(opportunityId, release, transaction);
+        return rivalHoldsUncommitted(opportunityId,
+                () -> insertOpen(opportunityId, organizationId, personId, source, MutableClock.INITIAL_INSTANT));
+    }
+
+    RivalOpening rivalStartsReplacingOpportunity(UUID organizationId, UUID personId, UUID previousOpportunityId,
+            Instant previousClosedAt, String source, Instant openedAt) throws InterruptedException {
+        var opportunityId = UUID.randomUUID();
+        return rivalHoldsUncommitted(opportunityId, () -> {
+            closeWithoutResponse(organizationId, previousOpportunityId, previousClosedAt);
+            insertOpen(opportunityId, organizationId, personId, source, openedAt);
+        });
     }
 
     boolean anotherSessionIsWaitingToWriteOpportunities() {
+        return anotherSessionIsWaitingOn("%insert into opportunities%");
+    }
+
+    boolean anotherSessionIsWaitingToLockTheLatestOpportunity() {
+        return anotherSessionIsWaitingOn("%from opportunities%for no key update%");
+    }
+
+    private boolean anotherSessionIsWaitingOn(String queryPattern) {
         return jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
                     SELECT 1 FROM pg_stat_activity
                     WHERE datname = current_database()
                       AND pid <> pg_backend_pid()
                       AND wait_event_type = 'Lock'
-                      AND query ILIKE '%insert into opportunities%')
-                """, Boolean.class);
+                      AND query ILIKE ?)
+                """, Boolean.class, queryPattern);
+    }
+
+    private RivalOpening rivalHoldsUncommitted(UUID opportunityId, Runnable writes) throws InterruptedException {
+        var written = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var transaction = background.submit(() -> transactionTemplate.executeWithoutResult(status -> {
+            writes.run();
+            written.countDown();
+            awaitRelease(release);
+        }));
+        assertThat(written.await(TIMEOUT.toSeconds(), TimeUnit.SECONDS)).as("rival wrote its opportunity")
+                .isTrue();
+        return new RivalOpening(opportunityId, release, transaction);
+    }
+
+    private void insertOpen(UUID opportunityId, UUID organizationId, UUID personId, String source,
+            Instant openedAt) {
+        jdbcTemplate.update("""
+                INSERT INTO opportunities (id, organization_id, person_id, source, status, opened_at,
+                    last_activity_at)
+                VALUES (?, ?, ?, ?, 'OPEN', ?, ?)
+                """, opportunityId, organizationId, personId, source, utc(openedAt), utc(openedAt));
+    }
+
+    private static OffsetDateTime utc(Instant instant) {
+        return OffsetDateTime.ofInstant(instant, ZoneOffset.UTC);
     }
 
     private static StoredOpportunity storedOpportunity(ResultSet row) throws SQLException {

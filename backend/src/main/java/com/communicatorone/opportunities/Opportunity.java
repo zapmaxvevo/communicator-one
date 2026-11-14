@@ -67,7 +67,9 @@ class Opportunity {
             closeAsUnanswered(inactivityEndsAt);
         }
         if (isOpen()) {
-            lastActivityAt = now;
+            if (now.isAfter(lastActivityAt)) {
+                lastActivityAt = now;
+            }
             return true;
         }
         if (settings.allowsReentryAt(closedAt, now)) {

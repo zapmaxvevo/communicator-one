@@ -54,6 +54,22 @@ class OpportunityTest {
     }
 
     @Test
+    void activityDatedBeforeTheLastRecordedActivityDoesNotMoveItBack() {
+        // Given
+        var opportunity = Opportunity.openFor(UUID.randomUUID(), SOURCE, OPENED_AT);
+        var lastRecordedActivity = OPENED_AT.plus(Duration.ofDays(2));
+        opportunity.recordActivityAt(lastRecordedActivity, SETTINGS);
+        var fromANodeWithALaggingClock = lastRecordedActivity.minus(Duration.ofMinutes(5));
+
+        // When
+        var stillCurrent = opportunity.recordActivityAt(fromANodeWithALaggingClock, SETTINGS);
+
+        // Then
+        assertThat(stillCurrent).isTrue();
+        assertOpen(opportunity, lastRecordedActivity);
+    }
+
+    @Test
     void personReturningJustBeforeTheReentryWindowEndsGetsTheSameOpportunityBack() {
         // Given
         var opportunity = Opportunity.openFor(UUID.randomUUID(), SOURCE, OPENED_AT);

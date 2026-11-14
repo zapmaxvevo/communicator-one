@@ -35,7 +35,12 @@ public class OpportunityTracker {
         try {
             return writing.execute(recording);
         } catch (DataIntegrityViolationException concurrentOpening) {
-            return writing.execute(recording);
+            try {
+                return writing.execute(recording);
+            } catch (RuntimeException retryFailure) {
+                retryFailure.addSuppressed(concurrentOpening);
+                throw retryFailure;
+            }
         }
     }
 
