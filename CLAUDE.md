@@ -64,7 +64,7 @@ Backend, desde `backend/`:
 ```bash
 ./mvnw verify                              # suite completa
 ./mvnw test -Dtest=ModularStructureTest    # estructura de módulos, sin Docker
-./mvnw test -Dtest=OpenApiSpecTest         # si openapi.json quedó desfasado, lo regenera y falla
+./mvnw test -Dtest=OpenApiSpecTest         # con Docker; si openapi.json quedó desfasado, lo regenera y falla
 ./mvnw spring-boot:run                     # necesita el Postgres de compose; puerto 8080 (otro: SERVER_PORT=8081)
 curl -s localhost:8080/actuator/health     # {"groups":["liveness","readiness"],"status":"UP"}
 ```
@@ -88,13 +88,15 @@ npm run build                            # tsc -b y vite build a dist/
 npm run generate:api                     # regenera src/api desde ../backend/openapi.json (no se edita a mano)
 ```
 
-Al cambiar la API: `./mvnw test -Dtest=OpenApiSpecTest` en `backend/`, después `npm run generate:api` en `web/`, y se
+Al cambiar la API: `./mvnw test -Dtest=OpenApiSpecTest` en `backend/` (la primera corrida falla a propósito al
+regenerar `backend/openapi.json`; la segunda tiene que pasar), después `npm run generate:api` en `web/`, y se
 commitean los dos (`backend/openapi.json` y `web/src/api`; P-016 y P-017).
 
 CI: `.github/workflows/backend.yml` corre `./mvnw verify` en push a `main` y en todo PR que toque `backend/`
-(cualquier base, también apilados); `.github/workflows/web.yml` hace lo mismo para `web/` con `npm ci`, lint, tests y
-build. `web.yml` también corre con cambios en `backend/openapi.json`, y antes del lint regenera el cliente y falla si
-`src/api` no está al día. No hay checks requeridos (P-012): mirar que el PR esté en verde antes de mergear.
+(cualquier base, también apilados), que incluye `OpenApiSpecTest`: un `openapi.json` desfasado lo hace fallar;
+`.github/workflows/web.yml` hace lo mismo para `web/` con `npm ci`, lint, tests y build. `web.yml` también corre con
+cambios en `backend/openapi.json`, y antes del lint regenera el cliente y falla si `src/api` no está al día. No hay checks
+requeridos (P-012): mirar que el PR esté en verde antes de mergear.
 
 ## Glosario (dominio en español → código en inglés)
 
