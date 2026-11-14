@@ -30,19 +30,20 @@ excepciones, que son públicas porque las traduce el handler del paquete raíz:
 | `OperatorRole`, `Availability` | Enums `OPERATOR`/`SUPERVISOR` y `ONLINE`/`AWAY`/`ON_LEAVE`, guardados por nombre (`@Enumerated(STRING)`, `Operator.java:35-39`). |
 | `OperatorRepository` | `JpaRepository` con `findByEmail`, filtrado por organización como toda consulta derivada. |
 | `OperatorEmailDirectory` | La única consulta que cruza organizaciones: dado un email, devuelve solo el `organization_id` (`OperatorEmailDirectory.java:17-21`). |
-| `OperatorAuthentication` | Caso de uso: `signIn(email, password)` y `currentOperator(principal)` (`OperatorAuthentication.java:30-45`). |
+| `OperatorAuthentication` | Caso de uso: `signIn(email, password)` y `currentOperator(principal)` (`OperatorAuthentication.java:34-49`). |
 | `OperatorTokens` | Emite el JWT (`issueFor`, `OperatorTokens.java:33-45`) y convierte un JWT ya validado en la `Authentication` con `AuthenticatedOperator` (`convert`, mapeo directo de los claims, `OperatorTokens.java:47-52`). |
-| `AuthenticatedOperator` | `record (operatorId, organizationId) implements OrganizationMember` (`AuthenticatedOperator.java:6`). |
+| `AuthenticatedOperator` | `record (operatorId, organizationId)` que implementa `OrganizationMember` y `AuthenticatedPrincipal`; `getName()` devuelve el id del operador, así que `Authentication.getName()` también (`AuthenticatedOperator.java:7-13`). |
 | `TokenConfiguration` | Beans `JwtEncoder`, `JwtDecoder` (con los validadores de tiempos y de claims) y `PasswordEncoder` (`TokenConfiguration.java:27-47`). |
-| `AuthenticationProperties` | `communicator-one.authentication.jwt-secret` y `token-lifetime` (default `8h`); rechaza al arrancar un secreto nulo, en blanco o de menos de 32 bytes UTF-8 (`AuthenticationProperties.java:8-19`), y no lo muestra en `toString` (`AuthenticationProperties.java:21-24`). |
-| `AuthenticationController` | `POST /api/auth/login` y `GET /api/me`, con sus DTOs como records anidados (`AuthenticationController.java:24-49`). |
+| `AuthenticationProperties` | `communicator-one.authentication.jwt-secret` y `token-lifetime` (default `8h`); rechaza al arrancar un secreto nulo, en blanco o de menos de 32 bytes UTF-8 y un `token-lifetime` nulo, cero o negativo (`AuthenticationProperties.java:13-22`), y no muestra el secreto en `toString` (`AuthenticationProperties.java:24-27`). |
+| `AuthenticationController` | `POST /api/auth/login` y `GET /api/me`, con sus DTOs como records anidados (`AuthenticationController.java:24-53`). `LoginRequest` recorta los espacios del email antes de validar (`AuthenticationController.java:38-40`). |
 | `InvalidCredentialsException`, `OperatorNotFoundException` | Públicas; las traduce `ApiExceptionHandler`. |
 
 En el paquete raíz (`backend/src/main/java/com/communicatorone/`):
 
-- `SecurityConfiguration`: `POST /api/auth/login` público (`SecurityConfiguration.java:30`), resource server JWT con
-  `OperatorTokens` como converter (`SecurityConfiguration.java:32-33`) y 401 sin cuerpo para quien no trae token
-  (`SecurityConfiguration.java:34-35`).
+- `SecurityConfiguration`: `POST /api/auth/login` público (`SIGN_IN`, `SecurityConfiguration.java:25-26`, `:37`),
+  resource server JWT con `OperatorTokens` como converter (`SecurityConfiguration.java:39-41`), un `BearerTokenResolver`
+  que no lee el header `Authorization` en el login (`SecurityConfiguration.java:40`, `:47-50`) y 401 sin cuerpo para
+  quien no trae token (`SecurityConfiguration.java:42-43`).
 - `ApiExceptionHandler`: único `@RestControllerAdvice`, extiende `ResponseEntityExceptionHandler`.
   `InvalidCredentialsException` → 401 con el mensaje de la excepción como `detail`, «Invalid email or password»
   (`ApiExceptionHandler.java:14-17`, `InvalidCredentialsException.java:5-7`);
@@ -73,7 +74,7 @@ que normalizarlo él mismo.
 
 Configuración: `communicator-one.authentication.jwt-secret: ${JWT_SECRET}` sin default (`application.yml:15-17`);
 `JWT_SECRET=` en `.env.example:9-10`. Sin la variable, vacía o con menos de 32 bytes, la app no arranca: falla
-`AuthenticationProperties`.
+`AuthenticationProperties`. Lo mismo con `communicator-one.authentication.token-lifetime` en cero o negativo.
 
 ## Diagramas
 
@@ -89,7 +90,8 @@ sequenceDiagram
     participant R as OperatorRepository
     participant T as OperatorTokens
     W->>C: POST /api/auth/login {email, password}
-    Note over C: @Valid: 400 si falta algo,<br/>el email no es válido o es muy largo
+    Note over W,C: un Bearer en el header se ignora (BearerTokenResolver)
+    Note over C: LoginRequest recorta el email;<br/>@Valid: 400 si falta algo,<br/>el email no es válido o es muy largo
     C->>A: signIn(email, password)
     A->>A: Operator.normalizedEmail(email)
     A->>D: organizationOf(email)
@@ -104,7 +106,7 @@ sequenceDiagram
         A->>CO: callAs(organizationId, ...)
         CO->>R: findByEmail(email), filtrado por organizationId
         R-->>A: Operator
-        alt clave equivocada
+        alt clave equivocada o hash sin prefijo conocido
             A-->>C: InvalidCredentialsException
             C-->>W: 401 ProblemDetail (idéntico)
         else clave correcta
@@ -137,24 +139,28 @@ flowchart TD
 
 Sin usuario autenticado no hay organización activa y el resolver devuelve el centinela, así que un
 `operators.findByEmail(email)` suelto volvería siempre vacío. Por eso `OperatorAuthentication.signIn`
-(`OperatorAuthentication.java:30-40`):
+(`OperatorAuthentication.java:34-44`):
 
 1. Normaliza el email con `Operator.normalizedEmail` (`strip` + `toLowerCase(Locale.ROOT)`, `Operator.java:61-63`), la
-   misma función que usa el alta. En la práctica solo cambia mayúsculas: un email con espacios alrededor no llega acá,
-   porque `@Email` lo rechaza con 400.
+   misma función que usa el alta. Los espacios alrededor ya los sacó `LoginRequest` antes de validar
+   (`AuthenticationController.java:38-40`), así que acá en la práctica solo cambian las mayúsculas. Un email de solo
+   espacios queda vacío y `@NotBlank` lo rechaza con 400.
 2. Busca la organización del email con `OperatorEmailDirectory.organizationOf` (`OperatorEmailDirectory.java:17-21`).
    Es la única consulta del sistema que cruza organizaciones a propósito (P-022), va por `JdbcTemplate` y devuelve solo
    el `organization_id`: ni el hash ni otros datos del operador.
 3. Con esa organización abre un ámbito `currentOrganization.callAs(organizationId, () -> operators.findByEmail(email))`
-   (`OperatorAuthentication.java:47-51`) y carga el operador con la lectura filtrada normal. `signIn` no es
+   (`OperatorAuthentication.java:60-64`) y carga el operador con la lectura filtrada normal. `signIn` no es
    `@Transactional` justamente porque `callAs` rechaza abrirse con una transacción en curso.
 4. Si no encontró operador (en el paso 2 o en el 3), compara igual la clave recibida contra un hash que se genera una vez
-   al arrancar (`OperatorAuthentication.java:27`, `:32-35`), para que un email desconocido tarde lo mismo que una clave
+   al arrancar (`OperatorAuthentication.java:31`, `:36-39`), para que un email desconocido tarde lo mismo que una clave
    equivocada, y lanza `InvalidCredentialsException`.
-5. Si la clave no coincide (`Operator.acceptsPassword`, `OperatorAuthentication.java:36-38`), lanza la misma excepción.
-6. Si coincide, emite el token (`OperatorAuthentication.java:39`).
+5. Si la clave no coincide (`Operator.acceptsPassword`, `OperatorAuthentication.java:40-42`), lanza la misma excepción.
+   Si el `password_hash` guardado no tiene un prefijo `{id}` conocido, el `DelegatingPasswordEncoder` lanza
+   `IllegalArgumentException`; `accepts` la atrapa, deja un WARN con el id del operador (no el email) y lo trata como
+   clave equivocada (`OperatorAuthentication.java:51-58`). Ese caso no compara ningún hash, así que no tarda lo mismo.
+6. Si coincide, emite el token (`OperatorAuthentication.java:43`).
 
-Los dos rechazos terminan en el mismo `ProblemDetail` 401, así que la respuesta no revela si el email existe.
+Todos los rechazos terminan en el mismo `ProblemDetail` 401, así que la respuesta no revela si el email existe.
 
 ### Token
 
@@ -190,14 +196,15 @@ Validación (`TokenConfiguration.java:32-42`): `NimbusJwtDecoder` con la misma c
 Si alguno falla, la respuesta es 401 con `WWW-Authenticate: Bearer error="invalid_token"`. Con el token ya validado,
 `OperatorTokens.convert` solo mapea los claims: la `Authentication` es un `UsernamePasswordAuthenticationToken`
 autenticado, con principal `AuthenticatedOperator(sub, organization_id)` y sin authorities
-(`OperatorTokens.java:47-52`).
+(`OperatorTokens.java:47-52`). Como `AuthenticatedOperator` es un `AuthenticatedPrincipal`, el nombre de esa
+`Authentication` es el id del operador.
 
 Como el principal implementa `OrganizationMember`, `CurrentOrganization` toma de ahí la organización activa
 (`docs/multi-tenant.md`, «Usuario autenticado»). El token no se vuelve a contrastar con la base en cada request.
 
 ### Perfil propio: `GET /api/me`
 
-`OperatorAuthentication.currentOperator` (`OperatorAuthentication.java:42-45`, `@Transactional(readOnly = true)`) hace
+`OperatorAuthentication.currentOperator` (`OperatorAuthentication.java:46-49`, `@Transactional(readOnly = true)`) hace
 `operators.findById(principal.operatorId())`. La lectura ya está filtrada por la organización del token, así que un
 token bien firmado cuyo `organization_id` no es la organización del operador (`sub`) da 404 sin datos del operador, y lo
 mismo pasa si el operador ya no existe.
@@ -209,8 +216,8 @@ rol: el rol se guarda y se devuelve en `/api/me`, nada más (P-025).
 
 ## Contrato para los clientes (web/)
 
-- **Login:** `POST /api/auth/login`, `Content-Type: application/json`, sin header `Authorization`. Si se manda un
-  Bearer inválido, el filtro de Spring Security responde 401 antes de llegar al login, aunque la ruta sea pública.
+- **Login:** `POST /api/auth/login`, `Content-Type: application/json`. En esa ruta el header `Authorization` se
+  ignora: un cliente que todavía manda su token vencido o inválido puede volver a iniciar sesión.
 - **Uso del token:** `Authorization: Bearer <accessToken>` en todas las demás rutas.
 - **`expiresAt`:** instante ISO-8601 en UTC con `Z`, sin fracción de segundo (`"2026-11-14T14:59:18Z"`). Es el
   momento en que el token deja de servir (con hasta 60 s de tolerancia del servidor). No hay refresh.
@@ -223,8 +230,8 @@ rol: el rol se guarda y se devuelve en `/api/me`, nada más (P-025).
   significa lo mismo: volver a iniciar sesión.
 - **400:** pedido inválido (`ProblemDetail`, `detail` «Invalid request content.») o JSON ilegible (`detail` «Failed to
   read request»). El login valida `email` (`@NotBlank @Email @Size(max = 254)`) y `password`
-  (`@NotBlank @Size(max = 128)`) (`AuthenticationController.java:35-37`). Un email con espacios alrededor se rechaza
-  con 400: el cliente lo recorta antes de mandarlo. Las mayúsculas no importan.
+  (`@NotBlank @Size(max = 128)`) (`AuthenticationController.java:35-36`), con el email ya recortado: los espacios
+  alrededor y las mayúsculas no importan, y un email de solo espacios da 400.
 - **404 de `/api/me`:** el operador del token no existe en su organización; tratarlo también como sesión inválida.
 
 ## Ejemplos
@@ -267,12 +274,12 @@ Errores:
 
 | Situación | Respuesta |
 |---|---|
-| Clave equivocada o email desconocido | 401 `application/problem+json`: `{"detail":"Invalid email or password","instance":"/api/auth/login","status":401,"title":"Unauthorized"}` |
-| Falta `email` o `password`, email inválido o con espacios alrededor, email de más de 254 caracteres o clave de más de 128 caracteres | 400 `{"detail":"Invalid request content.","instance":"/api/auth/login","status":400,"title":"Bad Request"}` |
+| Clave equivocada, email desconocido o `password_hash` sin prefijo `{id}` conocido | 401 `application/problem+json`: `{"detail":"Invalid email or password","instance":"/api/auth/login","status":401,"title":"Unauthorized"}` |
+| Falta `email` o `password`, email vacío, de solo espacios o inválido, email de más de 254 caracteres (ya recortado) o clave de más de 128 caracteres | 400 `{"detail":"Invalid request content.","instance":"/api/auth/login","status":400,"title":"Bad Request"}` |
 | JSON ilegible | 400 `{"detail":"Failed to read request",...}` |
 | Ruta protegida sin token | 401 sin cuerpo ni `WWW-Authenticate` |
 | Token con otra firma, vencido, sin `exp`, sin `organization_id` o con ids que no son UUID | 401 sin cuerpo, `WWW-Authenticate: Bearer error="invalid_token", error_description="...", ...` |
-| Bearer inválido mandado al login | 401 del filtro, igual que la fila anterior |
+| Bearer inválido o vencido mandado al login | Se ignora: el login responde según email y clave |
 | Token válido cuyo `sub` no existe en su `organization_id` | 404 `ProblemDetail` sin datos del operador |
 
 ## Alta de un operador en desarrollo
@@ -283,7 +290,8 @@ una vez), se cargan una organización y un operador por SQL. La fila tiene que c
 
 - `email` en minúsculas y sin espacios (si no, el login normalizado no lo encuentra y responde 401);
 - `password_hash` con el prefijo `{bcrypt}` (el `DelegatingPasswordEncoder` elige el algoritmo por el prefijo; sin él,
-  el login da 500);
+  el login responde el mismo 401 que una clave equivocada y deja un WARN `Operator <id> has a password hash without a
+  known encoding`);
 - `role` y `availability` con el nombre exacto de los enums (`OPERATOR`/`SUPERVISOR`, `ONLINE`/`AWAY`/`ON_LEAVE`; un
   valor distinto rompe la carga de la entidad);
 - `organization_id` de una organización existente (FK).
@@ -310,7 +318,7 @@ SQL
 ```
 
 Después: `POST /api/auth/login` con `ana@acme.test` y `clave-de-prueba`. El SQL y el comando de hash se probaron
-contra la app (también que sin `{bcrypt}` da 500 y que un email con mayúsculas en la fila da 401).
+contra la app (también que un email con mayúsculas en la fila da 401).
 
 ## Tests
 
@@ -335,11 +343,14 @@ test.
 |---|---|
 | `signedInOperatorSeesTheirOwnProfile` | Login 200 con solo `accessToken` y `expiresAt`; `expiresAt` = ahora + 8 h = `exp` del token; `/api/me` devuelve id, organización, email, nombre, rol y `AWAY`. |
 | `emailIsCaseInsensitiveAtSignIn` | El login con el email en mayúsculas funciona. |
+| `emailWithSurroundingSpacesSignsIn` | El login con espacios alrededor del email funciona y `/api/me` devuelve a Ana. |
+| `operatorStillSendingTheirExpiredTokenCanSignInAgain` | Con el token vencido todavía en `Authorization`, el login da 200 y el token nuevo sirve. |
 | `operatorOfAnotherOrganizationSignsInToTheirOwnOrganization` | El operador de Globex entra a Globex. |
 | `tokenClaimingAnotherOrganizationDoesNotRevealTheOperator` | Token firmado con el secreto real, `sub` de Ana y `organization_id` de Globex → 404 sin email, nombre ni organización de Ana. |
 | `wrongPasswordIsRejected` | 401 `application/problem+json` con «Invalid email or password» y sin token. |
 | `unknownEmailIsRejectedExactlyLikeAWrongPassword` | Email desconocido: mismo status, tipo de contenido y cuerpo que la clave equivocada. |
-| `malformedSignInRequestIsRejectedAsBadRequest` | Cuerpo vacío, sin email, sin clave, email vacío o inválido, clave en blanco, clave de 129 caracteres y JSON cortado → 400 sin token. |
+| `operatorWhosePasswordHashHasNoKnownEncodingIsRejectedExactlyLikeAnUnknownEmail` | Se le saca el prefijo `{bcrypt}` al hash de Ana por SQL: el login con su clave da 401 `application/problem+json` con el mismo cuerpo que un email desconocido. |
+| `malformedSignInRequestIsRejectedAsBadRequest` | Cuerpo vacío, sin email, sin clave, email vacío, de solo espacios o inválido, clave en blanco, clave de 129 caracteres y JSON cortado → 400 sin token. |
 | `tokenSignedWithAnotherSecretIsRejected` | 401 sin cuerpo con `WWW-Authenticate: Bearer`. |
 | `tokenIsStillAcceptedJustBeforeItExpires` | A las 8 h + 59 s el token sigue sirviendo (tolerancia de 60 s). |
 | `expiredTokenIsRejected` | A las 8 h + 61 s, 401 con `WWW-Authenticate: Bearer`. |
@@ -347,6 +358,18 @@ test.
 | `tokenWithoutExpirationIsRejected` | Token sin `exp` → 401 (`allowEmptyExpiryClaim=false`). |
 | `registeredOperatorIsStoredWithoutTheirPasswordInClearText` | La fila tiene organización, email, nombre, rol `SUPERVISOR`, disponibilidad `AWAY` y un `password_hash` que no contiene la clave. |
 | `emailAlreadyUsedInAnotherOrganizationCannotBeRegistered` | El mismo email (con otras mayúsculas y espacios) en Globex → `DataIntegrityViolationException`; queda solo el de Acme. |
+
+`backend/src/test/java/com/communicatorone/operators/AuthenticationPropertiesTest.java` (sin Spring):
+
+| Test | Qué cubre |
+|---|---|
+| `secretOfExactly32BytesWithAPositiveLifetimeIsAccepted` | Un secreto de exactamente 32 bytes con 8 h de vida se acepta. |
+| `missingBlankOrShorterThan32BytesSecretIsRejected` | Secreto nulo, vacío, en blanco o de 31 bytes → `IllegalArgumentException` que nombra `jwt-secret`. |
+| `missingZeroOrNegativeTokenLifetimeIsRejected` | `token-lifetime` nulo, `PT0S` o `PT-1S` → `IllegalArgumentException` que nombra `token-lifetime`. |
+
+`backend/src/test/java/com/communicatorone/operators/OperatorTokensTest.java` (sin Spring):
+`authenticationFromATokenIsNamedAfterTheOperator` comprueba que la `Authentication` que arma `convert` tiene como
+nombre el id del operador (`sub`).
 
 Otros:
 
@@ -362,9 +385,8 @@ registra un secreto JWT solo de test (`TestcontainersConfiguration.java:17`, `:2
 tokens armados a mano con el `JwtEncoder` de la app (o con uno de otro secreto, en
 `tokenSignedWithAnotherSecretIsRejected`) y lee el `exp` con el `JwtDecoder` de la app.
 
-Sin test automático, pero verificados a mano contra la app: el 400 por email con espacios alrededor, que una ruta
-protegida sin token responde sin `WWW-Authenticate` y que un Bearer inválido en el login da 401. Tampoco tienen test
-el rechazo al arrancar de un `JWT_SECRET` corto ni la igualación de tiempos con el hash ficticio.
+Sin test automático: que una ruta protegida sin token responde sin `WWW-Authenticate` (verificado a mano contra la
+app) y la igualación de tiempos con el hash ficticio.
 
 ## Pendiente antes de un deploy público
 

@@ -3,12 +3,16 @@ package com.communicatorone.operators;
 import com.communicatorone.organizations.CurrentOrganization;
 import java.util.Optional;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 class OperatorAuthentication {
+
+    private static final Logger log = LoggerFactory.getLogger(OperatorAuthentication.class);
 
     private final OperatorEmailDirectory emailDirectory;
     private final CurrentOrganization currentOrganization;
@@ -33,7 +37,7 @@ class OperatorAuthentication {
             passwordEncoder.matches(rawPassword, unknownOperatorPasswordHash);
             throw new InvalidCredentialsException();
         }
-        if (!operator.get().acceptsPassword(rawPassword, passwordEncoder)) {
+        if (!accepts(operator.get(), rawPassword)) {
             throw new InvalidCredentialsException();
         }
         return tokens.issueFor(operator.get());
@@ -42,6 +46,15 @@ class OperatorAuthentication {
     @Transactional(readOnly = true)
     Operator currentOperator(AuthenticatedOperator principal) {
         return operators.findById(principal.operatorId()).orElseThrow(OperatorNotFoundException::new);
+    }
+
+    private boolean accepts(Operator operator, String rawPassword) {
+        try {
+            return operator.acceptsPassword(rawPassword, passwordEncoder);
+        } catch (IllegalArgumentException unreadablePasswordHash) {
+            log.warn("Operator {} has a password hash without a known encoding", operator.id());
+            return false;
+        }
     }
 
     private Optional<Operator> operatorWithEmail(String email) {

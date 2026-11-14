@@ -12,11 +12,18 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.web.BearerTokenResolver;
+import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 
 @Configuration(proxyBeanMethods = false)
 class SecurityConfiguration {
+
+    private static final RequestMatcher SIGN_IN =
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/auth/login");
 
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http,
@@ -27,12 +34,18 @@ class SecurityConfiguration {
                 .authorizeHttpRequests(requests -> requests
                         .requestMatchers(EndpointRequest.to(HealthEndpoint.class)).permitAll()
                         .requestMatchers("/error").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
+                        .requestMatchers(SIGN_IN).permitAll()
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(resourceServer -> resourceServer
+                        .bearerTokenResolver(bearerTokenOutsideSignIn())
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(operatorAuthentication)))
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
                 .build();
+    }
+
+    private static BearerTokenResolver bearerTokenOutsideSignIn() {
+        var bearerTokens = new DefaultBearerTokenResolver();
+        return request -> SIGN_IN.matches(request) ? null : bearerTokens.resolve(request);
     }
 }

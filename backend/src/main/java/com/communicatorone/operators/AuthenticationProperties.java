@@ -16,6 +16,9 @@ record AuthenticationProperties(String jwtSecret, @DefaultValue("8h") Duration t
             throw new IllegalArgumentException(
                     "communicator-one.authentication.jwt-secret must have at least 32 bytes");
         }
+        if (tokenLifetime == null || tokenLifetime.isZero() || tokenLifetime.isNegative()) {
+            throw new IllegalArgumentException("communicator-one.authentication.token-lifetime must be positive");
+        }
     }
 
     @Override

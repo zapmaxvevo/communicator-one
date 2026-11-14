@@ -34,6 +34,10 @@ class AuthenticationController {
 
     record LoginRequest(@NotBlank @Email @Size(max = 254) String email,
             @NotBlank @Size(max = 128) String password) {
+
+        LoginRequest {
+            email = email == null ? null : email.strip();
+        }
     }
 
     record LoginResponse(String accessToken, Instant expiresAt) {

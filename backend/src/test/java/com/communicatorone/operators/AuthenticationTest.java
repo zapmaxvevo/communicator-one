@@ -121,6 +121,39 @@ class AuthenticationTest {
     }
 
     @Test
+    void emailWithSurroundingSpacesSignsIn() {
+        // When
+        var signIn = signIn("  " + ana.email() + " ", ana.password());
+        var profile = profileWith(accessTokenOf(signIn));
+
+        // Then
+        assertThat(signIn.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(profile.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(profile.getBody()).isEqualTo(profileOf(ana));
+    }
+
+    @Test
+    void operatorStillSendingTheirExpiredTokenCanSignInAgain() {
+        // Given
+        var expiredToken = accessTokenOf(signIn(ana.email(), ana.password()));
+        clock.advance(TOKEN_LIFETIME.plusSeconds(61));
+
+        // When
+        var signIn = client.post().uri("/api/auth/login")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + expiredToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("email", ana.email(), "password", ana.password()))
+                .retrieve()
+                .toEntity(JSON_OBJECT);
+        var profile = profileWith(accessTokenOf(signIn));
+
+        // Then
+        assertThat(signIn.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(profile.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(profile.getBody()).isEqualTo(profileOf(ana));
+    }
+
+    @Test
     void operatorOfAnotherOrganizationSignsInToTheirOwnOrganization() {
         // When
         var signIn = signIn(bruno.email(), bruno.password());
@@ -180,12 +213,29 @@ class AuthenticationTest {
         assertThat(unknownEmail.getBody()).isNotEmpty().isEqualTo(wrongPassword.getBody());
     }
 
+    @Test
+    void operatorWhosePasswordHashHasNoKnownEncodingIsRejectedExactlyLikeAnUnknownEmail() {
+        // Given
+        jdbcTemplate.update("UPDATE operators SET password_hash = substring(password_hash from 9) WHERE id = ?",
+                ana.id());
+        var unknownEmail = signIn("nobody-" + UUID.randomUUID() + "@acme.test", ana.password());
+
+        // When
+        var signIn = signIn(ana.email(), ana.password());
+
+        // Then
+        assertThat(signIn.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(signIn.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_PROBLEM_JSON);
+        assertThat(signIn.getBody()).isNotEmpty().isEqualTo(unknownEmail.getBody());
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
             "{}",
             "{\"password\": \"secret\"}",
             "{\"email\": \"ana@acme.test\"}",
             "{\"email\": \"\", \"password\": \"secret\"}",
+            "{\"email\": \"   \", \"password\": \"secret\"}",
             "{\"email\": \"not-an-email\", \"password\": \"secret\"}",
             "{\"email\": \"ana@acme.test\", \"password\": \"   \"}",
             "{\"email\": \"ana@acme.test\", \"password\": \""
