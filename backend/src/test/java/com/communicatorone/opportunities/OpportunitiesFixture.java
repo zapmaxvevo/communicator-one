@@ -12,12 +12,14 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -44,6 +46,15 @@ class OpportunitiesFixture {
         var id = UUID.randomUUID();
         jdbcTemplate.update("INSERT INTO organizations (id, name) VALUES (?, ?)", id, name);
         return id;
+    }
+
+    OrganizationsInClosingOrder twoOrganizationsInClosingOrderWithAnOpenOpportunity(String source,
+            Instant openedAt) {
+        var inClosingOrder = Stream.of(organization("Acme"), organization("Globex"))
+                .sorted(Comparator.comparing(UUID::toString))
+                .map(organizationId -> withAnOpenOpportunity(organizationId, source, openedAt))
+                .toList();
+        return new OrganizationsInClosingOrder(inClosingOrder.getFirst(), inClosingOrder.getLast());
     }
 
     void settings(UUID organizationId, int inactivityDaysToClose, int reentryWindowDays) {
@@ -166,6 +177,14 @@ class OpportunitiesFixture {
         return new RivalOpening(opportunityId, release, transaction);
     }
 
+    private OrganizationWithOpportunity withAnOpenOpportunity(UUID organizationId, String source,
+            Instant openedAt) {
+        var personId = person(organizationId);
+        var opportunityId = UUID.randomUUID();
+        insertOpen(opportunityId, organizationId, personId, source, openedAt);
+        return new OrganizationWithOpportunity(organizationId, personId, opportunityId);
+    }
+
     private void insertOpen(UUID opportunityId, UUID organizationId, UUID personId, String source,
             Instant openedAt) {
         jdbcTemplate.update("""
@@ -217,6 +236,12 @@ class OpportunitiesFixture {
             return new StoredOpportunity(id, personId, ownerId, source, OpportunityStatus.CLOSED,
                     OpportunityResult.NO_RESPONSE, openedAt, lastActivityAt, closedAt);
         }
+    }
+
+    record OrganizationWithOpportunity(UUID id, UUID personId, UUID opportunityId) {
+    }
+
+    record OrganizationsInClosingOrder(OrganizationWithOpportunity first, OrganizationWithOpportunity next) {
     }
 
     record RivalOpening(UUID opportunityId, CountDownLatch release, Future<?> transaction) {

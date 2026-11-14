@@ -60,7 +60,9 @@ docker compose down -v      # además borra el volumen de Postgres (reset del en
 - `JWT_SECRET` es obligatoria (sin default, P-023): sin ella, en blanco o con menos de 32 bytes, la app no arranca.
   Las demás variables tienen defaults que coinciden con compose y `application.yml`. La opcional
   `COMMUNICATOR_ONE_OPPORTUNITIES_CLOSING_CRON` (comentada en `.env.example`) cambia el horario del job de cierre de
-  oportunidades (cada hora por defecto); `-` lo apaga.
+  oportunidades (cada hora por defecto); `-` lo apaga. La opcional `COMMUNICATOR_ONE_OPPORTUNITIES_CLOSING_LOCK_TIMEOUT`
+  (también comentada) cambia cuánto espera ese job por una fila bloqueada antes de saltear la organización (`10s` por
+  defecto; sin unidad son milisegundos; `0` = sin límite).
 - Spring no lee `.env`: hay que exportar sus variables antes de correr la app, desde `backend/`:
   `set -a; . ../.env; set +a; ./mvnw spring-boot:run`. Los tests no necesitan `JWT_SECRET`
   (`TestcontainersConfiguration` registra un secreto solo de test).
@@ -91,7 +93,9 @@ dejaría aplicada la `R__` y la app normal fallaría al arrancar (`Validate fail
 `TestcontainersConfiguration` también desactiva el cron del job de cierre de oportunidades
 (`communicator-one.opportunities.closing-cron` = `-`), así que el job no queda programado en tests (lo verifica
 `OpportunityClosingJobTest.closingJobDoesNotRunOnItsOwnScheduleDuringTests`; el scheduling sigue activo y Spring
-Modulith Moments registra sus propias tareas). Los jobs `@Scheduled` se prueban llamando al método directamente.
+Modulith Moments registra sus propias tareas), y baja su lock timeout a `2s`
+(`communicator-one.opportunities.closing-lock-timeout`). Los jobs `@Scheduled` se prueban llamando al método
+directamente.
 
 Multi-tenant (P-018): toda entidad de negocio lleva `@TenantId UUID organizationId` y Hibernate filtra y asigna la
 organización activa, que da `CurrentOrganization` (`runAs` para procesos sin usuario, o el principal autenticado que

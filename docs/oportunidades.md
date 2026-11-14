@@ -39,18 +39,18 @@ organización; la organización la asigna y filtra Hibernate con `@TenantId` (P-
 |---|---|---|
 | `OpportunityTracker` | pública (API) | `@Service` con `recordActivity(UUID, String): UUID` (`OpportunityTracker.java:29-45`), que valida, abre su transacción con el bean `TransactionTemplate` y reintenta una vez ante `DataIntegrityViolationException`. El trabajo lo hace `currentOpportunityOf` (`OpportunityTracker.java:47-56`). Recibe repositorios, `TransactionTemplate` y `Clock` en el constructor (`OpportunityTracker.java:21-27`). |
 | `OpportunityClosingJob` | package-private | `@Component` con el método `@Scheduled` `closeInactiveOpportunitiesOfEveryOrganization()` (`OpportunityClosingJob.java:28-31`): lista por `JdbcTemplate` las organizaciones con oportunidades abiertas (`OpportunityClosingJob.java:33-37`) y para cada una corre `InactiveOpportunityClosing` dentro de `currentOrganization.runAs`; si falla, deja un WARN y sigue (`OpportunityClosingJob.java:39-45`). |
-| `InactiveOpportunityClosing` | package-private | `@Service` con `closeInactiveOpportunities()`, `@Transactional` (`InactiveOpportunityClosing.java:21-27`): cierra las oportunidades vencidas de la organización activa. Recibe repositorios y `Clock` en el constructor (`InactiveOpportunityClosing.java:14-19`). |
+| `InactiveOpportunityClosing` | package-private | `@Service` con `closeInactiveOpportunities()`, `@Transactional` (`InactiveOpportunityClosing.java:26-33`): acota la espera por locks de su transacción y cierra las oportunidades vencidas de la organización activa. Recibe repositorios, `Clock` y la propiedad `closing-lock-timeout` (`Duration`, por `@Value`) en el constructor (`InactiveOpportunityClosing.java:17-24`). |
 | `Opportunity` | package-private | Entidad de la tabla `opportunities`: `id`, `@TenantId organizationId`, `personId`, `ownerId`, `source`, `status` y `result` (guardados por nombre), `openedAt`, `lastActivityAt`, `closedAt` (`Opportunity.java:17-45`). Fábrica `openFor(personId, source, now)` (`Opportunity.java:58-62`), regla `recordActivityAt(now, settings)` (`Opportunity.java:64-77`) y `closeIfInactiveAt(now, settings)` (`Opportunity.java:79-84`), el cierre por inactividad que comparten el cierre al vuelo y el job; privados `closeAsUnanswered` y `reopen` (`Opportunity.java:118-129`). Sin setters. |
 | `OpportunityStatus` | package-private | `OPEN`, `CLOSED` (`OpportunityStatus.java:3-6`). |
 | `OpportunityResult` | package-private | `WON`, `LOST`, `NO_RESPONSE` (`OpportunityResult.java:3-7`). En #36 solo se usa `NO_RESPONSE`. |
 | `OpportunitySettings` | package-private | Entidad de la tabla `opportunity_settings`: `id`, `@TenantId organizationId`, `inactivityDaysToClose`, `reentryWindowDays` (`OpportunitySettings.java:22-32`). `of(int, int)` valida (`OpportunitySettings.java:42-46`), `defaults()` da 7 y 3 sin persistir (`OpportunitySettings.java:19-20`, `:48-50`), `inactivityEndsAt` (L + N), `inactivityCutoffAt` (ahora − N, el corte de la consulta del job) y `allowsReentryAt` hacen las cuentas (`OpportunitySettings.java:52-62`). |
-| `OpportunityRepository` | package-private | `findFirstByPersonIdOrderByOpenedAtDesc(UUID)` con `@Lock(PESSIMISTIC_WRITE)`: la última oportunidad de la persona, bloqueada para escritura (`OpportunityRepository.java:14-15`). `findOpenInactiveSince(Instant cutoff)`, JPQL con `@Lock(PESSIMISTIC_WRITE)`: las abiertas con `lastActivityAt <= cutoff`, ordenadas por id (`OpportunityRepository.java:17-23`). |
+| `OpportunityRepository` | package-private | `findFirstByPersonIdOrderByOpenedAtDesc(UUID)` con `@Lock(PESSIMISTIC_WRITE)`: la última oportunidad de la persona, bloqueada para escritura (`OpportunityRepository.java:14-15`). `findOpenInactiveSince(Instant cutoff)`, JPQL con `@Lock(PESSIMISTIC_WRITE)`: las abiertas con `lastActivityAt <= cutoff`, ordenadas por id (`OpportunityRepository.java:17-23`). `limitLockWaitingInCurrentTransaction(String timeout)`, nativa: `select set_config('lock_timeout', :timeout, true)`, el `lock_timeout` de la transacción en curso (`OpportunityRepository.java:25-26`). |
 | `OpportunitySettingsRepository` | package-private | `findCurrent()`, un JPQL sin filtro (`select s from OpportunitySettings s`) que `@TenantId` limita a la fila de la organización activa (`OpportunitySettingsRepository.java:10-11`), y el método `default` `currentOrDefaults()`, que devuelve esa fila o, si no hay, `OpportunitySettings.defaults()` (`OpportunitySettingsRepository.java:13-15`). Lo usan `OpportunityTracker` e `InactiveOpportunityClosing`. |
 
 El `package-info.java` con `@ApplicationModule` ya existía desde el scaffold y `ModularStructureTest` ya declaraba
 `opportunities`. #37 sumó, fuera del módulo, `SchedulingConfiguration` en el paquete raíz (`@EnableScheduling`,
-`SchedulingConfiguration.java:6-9`), la propiedad `communicator-one.opportunities.closing-cron` (ver «Configuración»)
-y la migración V5 (ver «Esquema»).
+`SchedulingConfiguration.java:6-9`), las propiedades `communicator-one.opportunities.closing-cron` y
+`communicator-one.opportunities.closing-lock-timeout` (ver «Configuración») y la migración V5 (ver «Esquema»).
 
 ## API y contrato
 
@@ -199,12 +199,13 @@ flowchart TD
     E -->|no| FIN[fin de la corrida]
     E -->|sí| R[currentOrganization.runAs organizationId]
     R --> T[InactiveOpportunityClosing.closeInactiveOpportunities<br/>una transacción]
-    T --> S[settings.currentOrDefaults<br/>fila o defaults 7 / 3]
+    T --> LT[set_config lock_timeout, closing-lock-timeout, true<br/>solo para esta transacción]
+    LT --> S[settings.currentOrDefaults<br/>fila o defaults 7 / 3]
     S --> NOW[now = clock.instant]
     NOW --> Q[findOpenInactiveSince now − N<br/>FOR NO KEY UPDATE, order by id]
     Q --> C[closeIfInactiveAt now, settings<br/>en cada fila: CLOSED / NO_RESPONSE en L + N]
     C --> OK[commit]
-    T -->|RuntimeException| RB[rollback de esa organización<br/>WARN con su id]
+    T -->|RuntimeException,<br/>p. ej. lock timeout 55P03| RB[rollback de esa organización<br/>WARN con su id]
     OK --> E
     RB --> E
 ```
@@ -345,7 +346,8 @@ Descartadas (P-035): `@Version` con N reintentos; unirse a la transacción del l
 El cierre al vuelo solo persiste el cierre cuando la persona vuelve a escribir. `OpportunityClosingJob` persiste el de
 las oportunidades vencidas que nadie toca, para que quien lea la tabla directamente no las vea abiertas. Lo dispara
 el scheduler de Spring con el cron `communicator-one.opportunities.closing-cron` (cada hora en punto por defecto; ver
-«Configuración»). Detalle y alternativas en P-037.
+«Configuración»), y la espera por cada lock la acota `communicator-one.opportunities.closing-lock-timeout` (10 s por
+defecto). Detalle y alternativas en P-037.
 
 ### Flujo
 
@@ -363,12 +365,23 @@ el scheduler de Spring con el cron `communicator-one.opportunities.closing-cron`
 2. **Por cada organización**, en orden, `currentOrganization.runAs(organizationId, closing::closeInactiveOpportunities)`
    (`OpportunityClosingJob.java:41`): el ámbito se abre fuera de la transacción y la transacción adentro, como pide el
    patrón de procesos sin usuario (`.claude/rules/java.md`).
-3. **`closeInactiveOpportunities`** (`InactiveOpportunityClosing.java:21-27`), en una transacción:
-   1. lee la configuración de la organización o los defaults con `settings.currentOrDefaults()`
-      (`InactiveOpportunityClosing.java:23`);
-   2. lee el reloj una vez, **antes** de la consulta (`InactiveOpportunityClosing.java:24`). El `closedAt` (L + N) no
+3. **`closeInactiveOpportunities`** (`InactiveOpportunityClosing.java:26-33`), en una transacción:
+   1. acota la espera por locks de la transacción con
+      `limitLockWaitingInCurrentTransaction(lockTimeout.toMillis() + "ms")` (`InactiveOpportunityClosing.java:28`,
+      `OpportunityRepository.java:25-26`). Con el default de 10 s ejecuta:
+
+      ```sql
+      select set_config('lock_timeout', '10000ms', true)
+      ```
+
+      El `true` lo hace local a la transacción (equivale a `SET LOCAL`): PostgreSQL lo descarta en el commit o el
+      rollback, así que no queda pegado a la conexión cuando vuelve al pool. Va por la conexión del `EntityManager`, la
+      misma de la transacción. Es lo primero que hace, antes de cualquier lectura; `0ms` es sin límite;
+   2. lee la configuración de la organización o los defaults con `settings.currentOrDefaults()`
+      (`InactiveOpportunityClosing.java:29`);
+   3. lee el reloj una vez, **antes** de la consulta (`InactiveOpportunityClosing.java:30`). El `closedAt` (L + N) no
       depende de `now`; `now` solo decide qué está vencido;
-   3. trae con `findOpenInactiveSince(settings.inactivityCutoffAt(now))` (`InactiveOpportunityClosing.java:25`) las
+   4. trae con `findOpenInactiveSince(settings.inactivityCutoffAt(now))` (`InactiveOpportunityClosing.java:31`) las
       abiertas con `lastActivityAt <= now − N`, ordenadas por id. Hibernate le agrega el filtro de `organization_id`
       (`@TenantId`) y, por `@Lock(PESSIMISTIC_WRITE)`, la traduce con `FOR NO KEY UPDATE`, el mismo lock que toma
       `recordActivity` (`OpportunityRepository.java:17-23`). El SQL que genera Hibernate es:
@@ -379,7 +392,7 @@ el scheduler de Spring con el cron `communicator-one.opportunities.closing-cron`
       order by o1_0.id for no key update of o1_0
       ```
 
-   4. a cada una le aplica `closeIfInactiveAt(now, settings)` (`InactiveOpportunityClosing.java:26`), que la cierra
+   5. a cada una le aplica `closeIfInactiveAt(now, settings)` (`InactiveOpportunityClosing.java:32`), que la cierra
       `CLOSED`/`NO_RESPONSE` con `closedAt` = L + N. Los cambios los guarda el dirty checking al confirmar.
 4. **Si falla una organización** (cualquier `RuntimeException`), su transacción se deshace entera (no se cierra
    ninguna de esa organización en esa corrida), queda un WARN con su id y la traza, y el job sigue con la siguiente
@@ -390,7 +403,19 @@ el scheduler de Spring con el cron `communicator-one.opportunities.closing-cron`
    <excepción y traza>
    ```
 
-   La siguiente corrida la vuelve a intentar.
+   La siguiente corrida la vuelve a intentar. Una de esas fallas es el lock timeout: si una fila (o la tabla, por un
+   DDL) queda bloqueada más de `closing-lock-timeout`, PostgreSQL cancela la sentencia y la organización se saltea.
+   No tiene un mensaje propio; se distingue por las líneas de Hibernate con el SQLState 55P03, justo antes del WARN
+   del job (salida de `organizationWhoseInactiveOpportunityStaysLockedIsSkippedWithoutHoldingUpTheJob`, recortada):
+
+   ```
+   WARN ... org.hibernate.orm.jdbc.error : HHH000247: ErrorCode: 0, SQLState: 55P03
+   WARN ... org.hibernate.orm.jdbc.error : ERROR: canceling statement due to lock timeout
+   WARN ... OpportunityClosingJob : Inactive opportunities of organization <organization_id> could not be closed
+   org.springframework.dao.CannotAcquireLockException: JDBC exception executing SQL [ERROR: canceling statement due to lock timeout] [select ... for no key update of o1_0]
+   ...
+   Caused by: org.hibernate.exception.LockTimeoutException: ...
+   ```
 
 Ejemplo (`jobClosesInactiveOpportunitiesDatedAtTheEndOfTheirInactivity`): una persona de Acme escribe por WhatsApp en
 L = 2026-03-02 09:00 y nadie vuelve a tocar la oportunidad. El job corre en L + 7d + 3h:
@@ -410,10 +435,10 @@ hubiera corrido.
 Job y `recordActivity` toman el mismo lock (`FOR NO KEY UPDATE`) sobre la misma fila, así que se serializan. Según
 quién llegue primero:
 
-**Caso 1: la actividad tiene la fila.** El job espera. Cuando la actividad confirma, PostgreSQL (READ COMMITTED)
-vuelve a evaluar el `WHERE` del job sobre la versión confirmada: `last_activity_at` ya no es `<= now − N` (o la fila ya
-no está `OPEN`), y queda afuera. La oportunidad sigue abierta con la actividad nueva. Lo reproduce
-`activityInProgressWhileTheJobRunsKeepsTheOpportunityOpen`:
+**Caso 1: la actividad tiene la fila.** El job espera (hasta `closing-lock-timeout`; ver el caso 1 bis). Cuando la
+actividad confirma, PostgreSQL (READ COMMITTED) vuelve a evaluar el `WHERE` del job sobre la versión confirmada:
+`last_activity_at` ya no es `<= now − N` (o la fila ya no está `OPEN`), y queda afuera. La oportunidad sigue abierta
+con la actividad nueva. Lo reproduce `activityInProgressWhileTheJobRunsKeepsTheOpportunityOpen`:
 
 ```mermaid
 sequenceDiagram
@@ -430,11 +455,38 @@ sequenceDiagram
     Note over J: no cierra nada, commit
 ```
 
+**Caso 1 bis: la actividad retiene la fila más que `closing-lock-timeout`.** El job no espera indefinidamente: a los
+10 s (2 s en los tests) PostgreSQL cancela su consulta con 55P03, la transacción de esa organización se deshace, queda
+el WARN y el job sigue con la siguiente organización. No se cierra nada de la organización salteada en esa corrida
+(tampoco las otras vencidas que tuviera); la siguiente corrida lo vuelve a intentar. Lo reproduce
+`organizationWhoseInactiveOpportunityStaysLockedIsSkippedWithoutHoldingUpTheJob`:
+
+```mermaid
+sequenceDiagram
+    participant A as Actividad (rival) en la organización 1
+    participant DB as PostgreSQL
+    participant J as Job
+    A->>DB: UPDATE opportunities SET last_activity_at = ... (organización 1)
+    Note over A,DB: sin confirmar
+    J->>DB: organización 1: set_config('lock_timeout', ..., true)
+    J->>DB: SELECT vencidas ... FOR NO KEY UPDATE
+    Note over J,DB: espera el lock de A
+    DB-->>J: 55P03 canceling statement due to lock timeout
+    Note over J: rollback de la organización 1, WARN
+    J->>DB: organización 2: set_config, SELECT vencidas, UPDATE CLOSED, COMMIT
+    A->>DB: COMMIT
+```
+
+El tope es por intento de lock: cada organización bloqueada puede frenar la corrida hasta `closing-lock-timeout`, y
+eso se suma (ver «Riesgos»).
+
 **Caso 2: el job tiene la fila.** La actividad espera. Cuando el job confirma, la actividad obtiene la fila ya
 `CLOSED`/`NO_RESPONSE` con `closedAt` = L + N; `closeIfInactiveAt` no hace nada y `recordActivityAt` aplica el
 reingreso (reabre si `now < L + N + W`, si no abre una nueva). Es el mismo resultado que si el cierre se hubiera hecho
 al vuelo, porque los dos usan `closeIfInactiveAt`. No tiene test propio de concurrencia: el tracker no cambió y el
-camino es el de `personReturningWithinTheReentryWindowReopensAnOpportunityAlreadyClosedForInactivity`.
+camino es el de `personReturningWithinTheReentryWindowReopensAnOpportunityAlreadyClosedForInactivity`. Esta espera de
+`recordActivity` no la acota `closing-lock-timeout`, que solo vale en la transacción del job: dura lo que tarde el job
+en confirmar esa organización.
 
 ```mermaid
 sequenceDiagram
@@ -451,7 +503,8 @@ sequenceDiagram
 
 **Sin deadlocks:** `recordActivity` bloquea una sola fila, y dos corridas del job a la vez (por ejemplo, en dos
 réplicas) bloquean en el mismo orden (`order by o.id`). La segunda espera a la primera y, al re-evaluar el `WHERE`, ve
-las filas ya cerradas y las salta: el resultado es correcto, pero el trabajo se duplica (ver «Riesgos»).
+las filas ya cerradas y las salta: el resultado es correcto, pero el trabajo se duplica (ver «Riesgos»). Si la primera
+retiene una organización más que `closing-lock-timeout`, la segunda la saltea con un WARN; la cierra la primera.
 
 ### Idempotencia
 
@@ -480,11 +533,12 @@ La configuración se lee en cada llamada, así que un cambio vale desde la sigui
 oportunidades ya abiertas (el cierre se recalcula con la N nueva). El job también la lee en cada corrida, una vez por
 organización. La configuración por campaña de D-002 se suma cuando existan campañas.
 
-### Horario del job
+### Horario y espera por locks del job
 
 | Propiedad | Default | Variable de entorno |
 |---|---|---|
 | `communicator-one.opportunities.closing-cron` | `"0 0 * * * *"` (`application.yml:21-22`): cada hora, en el segundo 0 del minuto 0 | `COMMUNICATOR_ONE_OPPORTUNITIES_CLOSING_CRON` (comentada en `.env.example`) |
+| `communicator-one.opportunities.closing-lock-timeout` | `10s` (`application.yml:21,23`): espera máxima por cada lock dentro de la transacción de una organización | `COMMUNICATOR_ONE_OPPORTUNITIES_CLOSING_LOCK_TIMEOUT` (comentada en `.env.example`) |
 
 - Es un cron de Spring de seis campos (segundo, minuto, hora, día, mes, día de la semana), evaluado en la zona horaria
   de la JVM; al ser horario, la zona no cambia nada.
@@ -492,8 +546,15 @@ organización. La configuración por campaña de D-002 se suma cuando existan ca
   `application.yml`. No es un `@ConfigurationProperties` (P-037).
 - `-` (`Scheduled.CRON_DISABLED`) apaga el job. Así lo dejan los tests: `TestcontainersConfiguration` registra
   `closing-cron = "-"` en su `DynamicPropertyRegistrar` `testProperties()`, junto con el secreto JWT de test
-  (`TestcontainersConfiguration.java:26-32`; el cron en `:30`), y los tests llaman
+  (`TestcontainersConfiguration.java:26-33`; el cron en `:30`), y los tests llaman
   al método directamente. En producción sirve para apagarlo en réplicas (ver «Riesgos»).
+- `closing-lock-timeout` es un `Duration` que el constructor de `InactiveOpportunityClosing` recibe por `@Value`, como
+  placeholder sin default (`InactiveOpportunityClosing.java:19`): el valor vive solo en `application.yml`. Acepta
+  unidad (`10s`, `500ms`); sin unidad, Spring lo toma en milisegundos. Se pasa a PostgreSQL en milisegundos. `0` es sin
+  límite (el comportamiento anterior a este límite). Los tests usan `2s` (`TestcontainersConfiguration.java:31`), para
+  que el test del lock timeout no espere 10 s. No es un `@ConfigurationProperties` (P-037).
+- Si en el deploy se define `statement_timeout`, tiene que ser mayor que `closing-lock-timeout`: si no, corta antes
+  la sentencia y el lock timeout no llega a actuar.
 - El scheduling lo activa `SchedulingConfiguration` (`@EnableScheduling`, paquete raíz). Hoy es redundante, porque
   `spring-modulith-moments` (que viene con `spring-modulith-starter-core`) ya lo activa, pero queda explícito (P-037).
 
@@ -620,8 +681,10 @@ con `callAs` (`recordIn`). Las filas se leen con `OpportunitiesFixture` (`JdbcTe
 `backend/src/test/java/com/communicatorone/opportunities/OpportunityClosingJobTest.java` (mismas anotaciones que
 `OpportunityTrackerTest`, más `OutputCaptureExtension`; sin `@Transactional`; reloj en `MutableClock.INITIAL_INSTANT`,
 restablecido antes y después de cada test). Las oportunidades se crean con `recordActivity` dentro de `callAs` y el job
-se corre llamando a `closeInactiveOpportunitiesOfEveryOrganization()` directamente. Como recorre todas las
-organizaciones de la base, cada test afirma solo sobre las suyas.
+se corre llamando a `closeInactiveOpportunitiesOfEveryOrganization()` directamente. Los dos tests con dos
+organizaciones en el orden del job las arman con
+`OpportunitiesFixture.twoOrganizationsInClosingOrderWithAnOpenOpportunity`, que inserta las oportunidades por SQL. Como
+el job recorre todas las organizaciones de la base, cada test afirma solo sobre las suyas.
 
 | Test | Qué cubre |
 |---|---|
@@ -631,17 +694,23 @@ organizaciones de la base, cada test afirma solo sobre las suyas.
 | `jobAppliesTheInactivityPeriodOfEachOrganization` | Acme con (1, 0) y Globex sin fila: job en L + 2d cierra la de Acme en L + 1d y deja abierta la de Globex. |
 | `runningTheJobAgainLeavesClosedOpportunitiesAsTheyWere` | Job en L + 8d y otra vez en L + 20d: sigue cerrada en L + 7d. |
 | `reentryWindowAfterALateJobRunIsMeasuredFromTheEndOfTheInactivity` | Job en L + 9d (tarde) y la persona vuelve por Instagram en L + 10d: id nuevo, la vieja cerrada en L + 7d y una nueva `OPEN`. El reingreso se mide desde L + 7d, no desde la corrida. |
-| `activityInProgressWhileTheJobRunsKeepsTheOpportunityOpen` | Caso 1 de la concurrencia, determinista: un hilo rival adelanta `last_activity_at` a L + 8d sin confirmar (`OpportunitiesFixture.rivalStartsRecordingActivity`); el job corre en otro hilo; Awaitility espera en `pg_stat_activity` una sesión bloqueada en `from opportunities … for no key update` (`anotherSessionIsWaitingToLockTheLatestOpportunity`, falla si el job termina antes) y recién ahí confirma el rival. Afirma que la fila queda `OPEN` con `last_activity_at` = L + 8d. |
-| `failureClosingTheOpportunitiesOfOneOrganizationDoesNotStopTheOthers` | Dos organizaciones ordenadas como las lista el job (por `UUID::toString`, que coincide con el orden de PostgreSQL); un trigger rechaza cerrar las de la primera (`OpportunitiesFixture.databaseRejectsClosingOpportunitiesOf`). El job no lanza, la de la primera sigue abierta, la de la segunda queda cerrada en L + 7d, y la salida capturada tiene un WARN con el id de la primera y el mensaje del trigger. |
+| `activityInProgressWhileTheJobRunsKeepsTheOpportunityOpen` | Caso 1 de la concurrencia, determinista: un hilo rival adelanta `last_activity_at` a L + 8d sin confirmar (`OpportunitiesFixture.rivalStartsRecordingActivity`); el job corre en otro hilo; Awaitility espera en `pg_stat_activity` una sesión bloqueada en `from opportunities … for no key update` (`anotherSessionIsWaitingToLockTheLatestOpportunity`, falla si el job termina antes) y recién ahí confirma el rival. Afirma que la fila queda `OPEN` con `last_activity_at` = L + 8d y que no salió el WARN de falla de su organización: con el rival confirmado, la fila queda igual aunque el job se haya rendido por lock timeout, así que lo que prueba que esperó y re-evaluó el `WHERE` es la ausencia del WARN. El rival confirma apenas se ve la espera, dentro de los 2 s del lock timeout de los tests. |
+| `failureClosingTheOpportunitiesOfOneOrganizationDoesNotStopTheOthers` | Dos organizaciones ordenadas como las lista el job (por `UUID::toString`, que coincide con el orden de PostgreSQL), cada una con una oportunidad abierta en L; un trigger rechaza cerrar las de la primera (`OpportunitiesFixture.databaseRejectsClosingOpportunitiesOf`). El job no lanza, la de la primera sigue abierta, la de la segunda queda cerrada en L + 7d, y la salida capturada tiene un WARN con el id de la primera y el mensaje del trigger. |
+| `organizationWhoseInactiveOpportunityStaysLockedIsSkippedWithoutHoldingUpTheJob` | Caso 1 bis, determinista: dos organizaciones en el orden del job, cada una con una oportunidad abierta en L; con el reloj en L + 7d + 3h, un hilo rival adelanta `last_activity_at` de la de la primera sin confirmar y lo retiene. El job corre en otro hilo y tiene que terminar dentro de `TIMEOUT` (10 s) con el rival todavía sin confirmar: si esperara el lock sin límite, no terminaría. Después confirma el rival. Afirma que la de la primera queda `OPEN` con la actividad del rival, que la de la segunda queda cerrada en L + 7d (el job siguió) y que hay un WARN «Inactive opportunities of organization <primera> could not be closed». |
 | `closingJobDoesNotRunOnItsOwnScheduleDuringTests` | El scheduling está activo (hay `ScheduledTaskHolder`) y ninguna tarea programada es `OpportunityClosingJob`: el `-` de `TestcontainersConfiguration` se aplica. No afirma que no haya tareas: Spring Modulith Moments registra las suyas. |
 
 Fixture (`OpportunitiesFixture`), lo agregado en #37:
 
+- `twoOrganizationsInClosingOrderWithAnOpenOpportunity(source, openedAt)`: crea Acme y Globex, las ordena por
+  `UUID::toString` (el orden en que las recorre el job) y a cada una le crea una persona y le inserta por SQL una
+  oportunidad `OPEN` con `opened_at` = `last_activity_at` = `openedAt` (`OpportunitiesFixture.java:51-58`, con el
+  privado `withAnOpenOpportunity` en `:180-186`). Devuelve un `OrganizationsInClosingOrder(first, next)` de
+  `OrganizationWithOpportunity(id, personId, opportunityId)` (`OpportunitiesFixture.java:241-245`).
 - `rivalStartsRecordingActivity(organizationId, opportunityId, at)`: en otro hilo, un `UPDATE` de `last_activity_at`
   que queda sin confirmar hasta `commit()`, con el mismo mecanismo que los rivales de #36.
 - `databaseRejectsClosingOpportunitiesOf(organizationId)`: crea la función plpgsql `reject_closing_opportunities()` y
   un trigger `BEFORE UPDATE` con el mismo nombre fijo, `reject_closing_opportunities`, limitado a esa organización y a
-  `NEW.status = 'CLOSED'`, que lanza una excepción (`OpportunitiesFixture.java:118-135`). Usa `CREATE FUNCTION` y
+  `NEW.status = 'CLOSED'`, que lanza una excepción (`OpportunitiesFixture.java:129-146`). Usa `CREATE FUNCTION` y
   `CREATE TRIGGER` sin `OR REPLACE`: si quedaran de una corrida anterior, falla en vez de pisarlos; por eso admite una
   sola organización rechazada a la vez. Devuelve un `AutoCloseable` que borra el trigger y la función con `DROP` sin
   `IF EXISTS`.
@@ -675,19 +744,31 @@ Fixture (`OpportunitiesFixture`), lo agregado en #37:
 - **Una transacción por organización, sin lotes**: una organización con muchas vencidas acumuladas (por ejemplo, la
   primera corrida después de mucho tiempo) cierra todas en una sola transacción, con todas esas filas bloqueadas hasta
   el commit.
-- **Sin lock timeout, en un scheduler de un solo hilo**: el hilo del `TaskScheduler` lo comparten el job y los ticks
-  horarios de Spring Modulith Moments (`spring-modulith-starter-core`, `backend/pom.xml:60-61`), que disparan también en
-  el minuto 0. El hilo único agrava el riesgo en vez de mitigarlo: si el job queda esperando un lock retenido, frena
-  todas las tareas programadas, no solo el job. Hoy no hay listeners de Moments, así que el impacto es nulo.
-  Mitigación futura: `spring.task.scheduling.pool.size` o `SET LOCAL lock_timeout`.
-- **El cron de `application.yml` no lo valida la suite**: los tests lo reemplazan por `-`. Un cron inválido se ve recién
-  al arrancar la app.
+- **Espera por locks en un scheduler de un solo hilo, con mitigación parcial**: el hilo del `TaskScheduler` lo
+  comparten el job y los ticks horarios de Spring Modulith Moments (`spring-modulith-starter-core`,
+  `backend/pom.xml:60-61`), que disparan también en el minuto 0: si el job queda esperando un lock, frena todas las
+  tareas programadas, no solo el job (hoy no hay listeners de Moments, así que el impacto es nulo).
+  `closing-lock-timeout` lo acota, pero solo en parte:
+  - el tope es por intento de lock, es decir por organización bloqueada: una corrida puede frenar el hilo unos 10 s por
+    cada organización con filas bloqueadas, y eso se suma;
+  - no protege a un `recordActivity` (webhook) que espera una fila que tiene el job: esa espera sigue sin tope;
+  - también corta las esperas por locks de DDL (por ejemplo, una migración durante un deploy): en ese caso sale un WARN
+    por organización y la corrida no cierra nada de ellas;
+  - `0` vuelve al comportamiento sin límite.
+
+  Mejoras futuras no aplicadas: `spring.task.scheduling.pool.size`, para que el job no frene a las otras tareas;
+  validar al arrancar el rango del `Duration` (uno negativo o de más de `INT_MAX` ms hace fallar `set_config` en cada
+  organización, y solo deja WARNs); un WARN propio, sin traza, para el timeout (hoy se distingue por la línea de
+  Hibernate con SQLState 55P03).
+- **El cron y el lock timeout de `application.yml` no los valida la suite**: los tests reemplazan el cron por `-` y el
+  lock timeout por `2s`. Un cron inválido se ve recién al arrancar la app; un lock timeout fuera de rango, recién en
+  los WARN de la primera corrida.
 - **V5 usa `CREATE INDEX` sin `CONCURRENTLY`**: bloquea las escrituras en `opportunities` mientras se crea. Hoy la
   tabla no tiene datos productivos; con tablas grandes, va `CONCURRENTLY` en una migración propia
   (`.claude/rules/flyway.md`).
 - **El responsable** (`owner_id`) queda siempre nulo hasta el reparto (#13), y no hay eventos hasta entonces.
 - Los tests de las carreras dependen de `pg_stat_activity` (PostgreSQL), y el de la falla por organización, de un
-  trigger plpgsql.
+  trigger plpgsql. El del lock timeout tarda lo que el `closing-lock-timeout` de los tests (2 s).
 
 ## Pendiente: #13
 

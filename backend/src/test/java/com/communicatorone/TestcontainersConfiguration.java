@@ -28,6 +28,7 @@ public class TestcontainersConfiguration {
         return registry -> {
             registry.add("communicator-one.authentication.jwt-secret", () -> JWT_SECRET);
             registry.add("communicator-one.opportunities.closing-cron", () -> Scheduled.CRON_DISABLED);
+            registry.add("communicator-one.opportunities.closing-lock-timeout", () -> "2s");
         };
     }
 

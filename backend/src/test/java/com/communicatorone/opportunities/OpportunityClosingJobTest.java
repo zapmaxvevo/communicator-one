@@ -12,13 +12,11 @@ import com.communicatorone.organizations.CurrentOrganization;
 import com.communicatorone.people.PersonDirectory;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Comparator;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -190,7 +188,7 @@ class OpportunityClosingJobTest {
     }
 
     @Test
-    void activityInProgressWhileTheJobRunsKeepsTheOpportunityOpen() throws Exception {
+    void activityInProgressWhileTheJobRunsKeepsTheOpportunityOpen(CapturedOutput output) throws Exception {
         // Given
         var acme = fixture.organization("Acme");
         var person = fixture.person(acme);
@@ -210,40 +208,63 @@ class OpportunityClosingJobTest {
         // Then
         assertThat(fixture.opportunitiesOf(acme)).containsExactly(
                 open(opportunityId, person, "whatsapp", NOW, activityAt));
+        assertThat(output.getAll()).doesNotContain(
+                "Inactive opportunities of organization " + acme + " could not be closed");
     }
 
     @Test
     void failureClosingTheOpportunitiesOfOneOrganizationDoesNotStopTheOthers(CapturedOutput output)
             throws Exception {
         // Given
-        var organizationsInLine = Stream.of(fixture.organization("Acme"), fixture.organization("Globex"))
-                .sorted(Comparator.comparing(UUID::toString))
-                .toList();
-        var firstInLine = organizationsInLine.getFirst();
-        var nextInLine = organizationsInLine.getLast();
-        var firstInLinePerson = fixture.person(firstInLine);
-        var nextInLinePerson = fixture.person(nextInLine);
-        var firstInLineOpportunity = recordIn(firstInLine, firstInLinePerson, "whatsapp");
-        var nextInLineOpportunity = recordIn(nextInLine, nextInLinePerson, "whatsapp");
+        var inClosingOrder = fixture.twoOrganizationsInClosingOrderWithAnOpenOpportunity("whatsapp", NOW);
+        var firstInLine = inClosingOrder.first();
+        var nextInLine = inClosingOrder.next();
         clock.setTo(NOW.plus(DEFAULT_INACTIVITY_PERIOD).plus(Duration.ofHours(3)));
 
         // When
         Throwable failure;
-        try (var _ = fixture.databaseRejectsClosingOpportunitiesOf(firstInLine)) {
+        try (var _ = fixture.databaseRejectsClosingOpportunitiesOf(firstInLine.id())) {
             failure = catchThrowable(job::closeInactiveOpportunitiesOfEveryOrganization);
         }
 
         // Then
         assertThat(failure).isNull();
-        assertThat(fixture.opportunitiesOf(firstInLine)).containsExactly(
-                open(firstInLineOpportunity, firstInLinePerson, "whatsapp", NOW, NOW));
-        assertThat(fixture.opportunitiesOf(nextInLine)).containsExactly(
-                open(nextInLineOpportunity, nextInLinePerson, "whatsapp", NOW, NOW)
+        assertThat(fixture.opportunitiesOf(firstInLine.id())).containsExactly(
+                open(firstInLine.opportunityId(), firstInLine.personId(), "whatsapp", NOW, NOW));
+        assertThat(fixture.opportunitiesOf(nextInLine.id())).containsExactly(
+                open(nextInLine.opportunityId(), nextInLine.personId(), "whatsapp", NOW, NOW)
                         .closedWithoutResponseAt(NOW.plus(DEFAULT_INACTIVITY_PERIOD)));
         assertThat(output.getAll().lines()).anySatisfy(
-                line -> assertThat(line).contains("WARN", firstInLine.toString()));
-        assertThat(output.getAll()).contains("Closing the opportunities of organization " + firstInLine
+                line -> assertThat(line).contains("WARN", firstInLine.id().toString()));
+        assertThat(output.getAll()).contains("Closing the opportunities of organization " + firstInLine.id()
                 + " is rejected");
+    }
+
+    @Test
+    void organizationWhoseInactiveOpportunityStaysLockedIsSkippedWithoutHoldingUpTheJob(CapturedOutput output)
+            throws Exception {
+        // Given
+        var inClosingOrder = fixture.twoOrganizationsInClosingOrderWithAnOpenOpportunity("whatsapp", NOW);
+        var lockedInLine = inClosingOrder.first();
+        var nextInLine = inClosingOrder.next();
+        var activityAt = NOW.plus(DEFAULT_INACTIVITY_PERIOD).plus(Duration.ofHours(3));
+        clock.setTo(activityAt);
+        var rival = fixture.rivalStartsRecordingActivity(lockedInLine.id(), lockedInLine.opportunityId(),
+                activityAt);
+
+        // When
+        var closing = CompletableFuture.runAsync(job::closeInactiveOpportunitiesOfEveryOrganization, background);
+        assertThat(closing).as("job finishing while the rival holds the lock").succeedsWithin(TIMEOUT);
+        rival.commit();
+
+        // Then
+        assertThat(fixture.opportunitiesOf(lockedInLine.id())).containsExactly(
+                open(lockedInLine.opportunityId(), lockedInLine.personId(), "whatsapp", NOW, activityAt));
+        assertThat(fixture.opportunitiesOf(nextInLine.id())).containsExactly(
+                open(nextInLine.opportunityId(), nextInLine.personId(), "whatsapp", NOW, NOW)
+                        .closedWithoutResponseAt(NOW.plus(DEFAULT_INACTIVITY_PERIOD)));
+        assertThat(output.getAll().lines()).anySatisfy(line -> assertThat(line).contains("WARN",
+                "Inactive opportunities of organization " + lockedInLine.id() + " could not be closed"));
     }
 
     @Test

@@ -21,4 +21,7 @@ interface OpportunityRepository extends JpaRepository<Opportunity, UUID> {
               and o.lastActivityAt <= :cutoff
             order by o.id""")
     List<Opportunity> findOpenInactiveSince(Instant cutoff);
+
+    @Query(value = "select set_config('lock_timeout', :timeout, true)", nativeQuery = true)
+    String limitLockWaitingInCurrentTransaction(String timeout);
 }
