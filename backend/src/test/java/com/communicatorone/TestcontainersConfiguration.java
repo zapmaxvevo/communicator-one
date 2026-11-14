@@ -1,6 +1,5 @@
 package com.communicatorone;
 
-import java.time.Instant;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
@@ -31,6 +30,6 @@ public class TestcontainersConfiguration {
     @Bean
     @Primary
     MutableClock mutableClock() {
-        return new MutableClock(Instant.parse("2026-03-02T09:00:00Z"));
+        return new MutableClock();
     }
 }

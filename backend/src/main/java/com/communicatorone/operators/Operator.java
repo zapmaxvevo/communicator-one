@@ -12,6 +12,7 @@ import java.util.Locale;
 import java.util.UUID;
 import org.hibernate.annotations.TenantId;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.util.Assert;
 
 @Entity
 @Table(name = "operators")
@@ -50,12 +51,10 @@ class Operator {
 
     static Operator register(String email, String name, OperatorRole role, String rawPassword,
             PasswordEncoder passwordEncoder) {
-        requireText(email, "An operator needs an email");
-        requireText(name, "An operator needs a name");
-        if (role == null) {
-            throw new IllegalArgumentException("An operator needs a role");
-        }
-        requireText(rawPassword, "An operator needs a password");
+        Assert.hasText(email, "An operator needs an email");
+        Assert.hasText(name, "An operator needs a name");
+        Assert.notNull(role, "An operator needs a role");
+        Assert.hasText(rawPassword, "An operator needs a password");
         return new Operator(normalizedEmail(email), name, role, passwordEncoder.encode(rawPassword));
     }
 
@@ -89,11 +88,5 @@ class Operator {
 
     Availability availability() {
         return availability;
-    }
-
-    private static void requireText(String value, String message) {
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException(message);
-        }
     }
 }

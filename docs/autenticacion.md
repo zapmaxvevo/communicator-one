@@ -26,14 +26,14 @@ excepciones, que son públicas porque las traduce el handler del paquete raíz:
 
 | Clase | Qué hace |
 |---|---|
-| `Operator` | Entidad de la tabla `operators`, con `@TenantId organizationId` (`Operator.java:24-26`). `Operator.register(email, name, role, rawPassword, encoder)` valida que no falte nada, normaliza el email, guarda el hash y arranca `AWAY` (`Operator.java:43-60`). `acceptsPassword` compara contra el hash (`Operator.java:66-68`). |
-| `OperatorRole`, `Availability` | Enums `OPERATOR`/`SUPERVISOR` y `ONLINE`/`AWAY`/`ON_LEAVE`, guardados por nombre (`@Enumerated(STRING)`, `Operator.java:34-38`). |
+| `Operator` | Entidad de la tabla `operators`, con `@TenantId organizationId` (`Operator.java:25-27`). `Operator.register(email, name, role, rawPassword, encoder)` valida con `Assert` que no falte nada (`IllegalArgumentException`), normaliza el email, guarda el hash y arranca `AWAY` (`Operator.java:44-59`). `acceptsPassword` compara contra el hash (`Operator.java:65-67`). |
+| `OperatorRole`, `Availability` | Enums `OPERATOR`/`SUPERVISOR` y `ONLINE`/`AWAY`/`ON_LEAVE`, guardados por nombre (`@Enumerated(STRING)`, `Operator.java:35-39`). |
 | `OperatorRepository` | `JpaRepository` con `findByEmail`, filtrado por organización como toda consulta derivada. |
 | `OperatorEmailDirectory` | La única consulta que cruza organizaciones: dado un email, devuelve solo el `organization_id` (`OperatorEmailDirectory.java:17-21`). |
 | `OperatorAuthentication` | Caso de uso: `signIn(email, password)` y `currentOperator(principal)` (`OperatorAuthentication.java:30-45`). |
-| `OperatorTokens` | Emite el JWT (`issueFor`, `OperatorTokens.java:34-46`) y convierte un JWT válido en la `Authentication` con `AuthenticatedOperator` (`convert`, `OperatorTokens.java:48-53`). |
+| `OperatorTokens` | Emite el JWT (`issueFor`, `OperatorTokens.java:33-45`) y convierte un JWT ya validado en la `Authentication` con `AuthenticatedOperator` (`convert`, mapeo directo de los claims, `OperatorTokens.java:47-52`). |
 | `AuthenticatedOperator` | `record (operatorId, organizationId) implements OrganizationMember` (`AuthenticatedOperator.java:6`). |
-| `TokenConfiguration` | Beans `JwtEncoder`, `JwtDecoder` y `PasswordEncoder` (`TokenConfiguration.java:23-41`). |
+| `TokenConfiguration` | Beans `JwtEncoder`, `JwtDecoder` (con los validadores de tiempos y de claims) y `PasswordEncoder` (`TokenConfiguration.java:27-47`). |
 | `AuthenticationProperties` | `communicator-one.authentication.jwt-secret` y `token-lifetime` (default `8h`); rechaza al arrancar un secreto nulo, en blanco o de menos de 32 bytes UTF-8 (`AuthenticationProperties.java:8-19`), y no lo muestra en `toString` (`AuthenticationProperties.java:21-24`). |
 | `AuthenticationController` | `POST /api/auth/login` y `GET /api/me`, con sus DTOs como records anidados (`AuthenticationController.java:24-49`). |
 | `InvalidCredentialsException`, `OperatorNotFoundException` | Públicas; las traduce `ApiExceptionHandler`. |
@@ -44,7 +44,8 @@ En el paquete raíz (`backend/src/main/java/com/communicatorone/`):
   `OperatorTokens` como converter (`SecurityConfiguration.java:32-33`) y 401 sin cuerpo para quien no trae token
   (`SecurityConfiguration.java:34-35`).
 - `ApiExceptionHandler`: único `@RestControllerAdvice`, extiende `ResponseEntityExceptionHandler`.
-  `InvalidCredentialsException` → 401 «Invalid email or password» (`ApiExceptionHandler.java:14-17`);
+  `InvalidCredentialsException` → 401 con el mensaje de la excepción como `detail`, «Invalid email or password»
+  (`ApiExceptionHandler.java:14-17`, `InvalidCredentialsException.java:5-7`);
   `OperatorNotFoundException` → 404 (`ApiExceptionHandler.java:19-22`). Los 400 de validación y de JSON ilegible los
   arma `ResponseEntityExceptionHandler`.
 - `ClockConfiguration`: bean `Clock.systemUTC()` (`ClockConfiguration.java:10-13`), que usan la emisión y la validación
@@ -120,11 +121,10 @@ Request autenticado (por ejemplo `GET /api/me`):
 flowchart TD
     Q[Request a ruta protegida] --> H{¿Trae<br/>Authorization: Bearer?}
     H -->|no| U1[401 sin cuerpo<br/>HttpStatusEntryPoint]
-    H -->|sí| V{JwtDecoder: firma HS256,<br/>exp presente y no vencido ±60 s}
+    H -->|sí| V{JwtDecoder: firma HS256,<br/>exp presente y no vencido ±60 s,<br/>sub y organization_id son UUID}
     V -->|no| U2[401 sin cuerpo<br/>WWW-Authenticate: Bearer error=invalid_token]
-    V -->|sí| K{OperatorTokens.convert:<br/>sub y organization_id son UUID}
-    K -->|no| U2
-    K -->|sí| P[Authentication autenticada<br/>principal AuthenticatedOperator]
+    V -->|sí| K[OperatorTokens.convert]
+    K --> P[Authentication autenticada<br/>principal AuthenticatedOperator]
     P --> M[CurrentOrganization resuelve<br/>organization_id del token]
     M --> F["findById(sub) filtrado por esa organización"]
     F -->|existe| OK[200 perfil]
@@ -139,7 +139,7 @@ Sin usuario autenticado no hay organización activa y el resolver devuelve el ce
 `operators.findByEmail(email)` suelto volvería siempre vacío. Por eso `OperatorAuthentication.signIn`
 (`OperatorAuthentication.java:30-40`):
 
-1. Normaliza el email con `Operator.normalizedEmail` (`strip` + `toLowerCase(Locale.ROOT)`, `Operator.java:62-64`), la
+1. Normaliza el email con `Operator.normalizedEmail` (`strip` + `toLowerCase(Locale.ROOT)`, `Operator.java:61-63`), la
    misma función que usa el alta. En la práctica solo cambia mayúsculas: un email con espacios alrededor no llega acá,
    porque `@Email` lo rechaza con 400.
 2. Busca la organización del email con `OperatorEmailDirectory.organizationOf` (`OperatorEmailDirectory.java:17-21`).
@@ -158,15 +158,15 @@ Los dos rechazos terminan en el mismo `ProblemDetail` 401, así que la respuesta
 
 ### Token
 
-`OperatorTokens.issueFor` (`OperatorTokens.java:34-46`) firma con HS256 (`JwsHeader.with(MacAlgorithm.HS256)`) usando la
-clave `HmacSHA256` hecha con los bytes UTF-8 de `JWT_SECRET` (`TokenConfiguration.java:43-45`). El encoder de Nimbus
+`OperatorTokens.issueFor` (`OperatorTokens.java:33-45`) firma con HS256 (`JwsHeader.with(MacAlgorithm.HS256)`) usando la
+clave `HmacSHA256` hecha con los bytes UTF-8 de `JWT_SECRET` (`TokenConfiguration.java:61-63`). El encoder de Nimbus
 agrega un `kid` al header. Claims:
 
 | Claim | Valor |
 |---|---|
 | `sub` | id del operador |
-| `organization_id` | id de su organización (`OperatorTokens.java:22`, `:39`) |
-| `iat` | `clock.instant()` truncado a segundos (`OperatorTokens.java:35`) |
+| `organization_id` | id de su organización (`OperatorTokens.java:21`, `:38`) |
+| `iat` | `clock.instant()` truncado a segundos (`OperatorTokens.java:34`) |
 | `exp` | `iat` + `token-lifetime` (8 h por defecto) |
 
 No lleva rol, authorities, `iss` ni refresh token: cuando vence, se vuelve a iniciar sesión. El `expiresAt` de la
@@ -179,13 +179,18 @@ Ejemplo real (header y payload decodificados):
 {"sub":"1d5e27d6-c1a0-47f2-83a2-54ad8a05dd5b","exp":1794668358,"iat":1794639558,"organization_id":"11111111-1111-1111-1111-111111111111"}
 ```
 
-Validación (`TokenConfiguration.java:28-36`): `NimbusJwtDecoder` con la misma clave y HS256 verifica la firma; el
-único validador de claims es un `JwtTimestampValidator` con el `Clock` inyectado, la tolerancia por defecto de 60 s y
-`setAllowEmptyExpiryClaim(false)` (`TokenConfiguration.java:33`), así que un token sin `exp` se rechaza. Después,
-`OperatorTokens.convert` exige que `sub` y `organization_id` existan y sean UUID; si no, lanza
-`InvalidBearerTokenException` (`OperatorTokens.java:55-64`) y la respuesta es 401. Con un token válido, la
-`Authentication` es un `UsernamePasswordAuthenticationToken` autenticado, con principal
-`AuthenticatedOperator(sub, organization_id)` y sin authorities (`OperatorTokens.java:48-53`).
+Validación (`TokenConfiguration.java:32-42`): `NimbusJwtDecoder` con la misma clave y HS256 verifica la firma, y un
+`DelegatingOAuth2TokenValidator` junta tres validadores de claims (`TokenConfiguration.java:38-40`):
+
+- un `JwtTimestampValidator` con el `Clock` inyectado, la tolerancia por defecto de 60 s y
+  `setAllowEmptyExpiryClaim(false)` (`TokenConfiguration.java:35-37`), así que un token sin `exp` se rechaza;
+- dos `JwtClaimValidator` que exigen que `sub` y `organization_id` existan y sean strings con forma de UUID
+  (`isUuid`, `TokenConfiguration.java:49-59`).
+
+Si alguno falla, la respuesta es 401 con `WWW-Authenticate: Bearer error="invalid_token"`. Con el token ya validado,
+`OperatorTokens.convert` solo mapea los claims: la `Authentication` es un `UsernamePasswordAuthenticationToken`
+autenticado, con principal `AuthenticatedOperator(sub, organization_id)` y sin authorities
+(`OperatorTokens.java:47-52`).
 
 Como el principal implementa `OrganizationMember`, `CurrentOrganization` toma de ahí la organización activa
 (`docs/multi-tenant.md`, «Usuario autenticado»). El token no se vuelve a contrastar con la base en cada request.
@@ -199,7 +204,7 @@ mismo pasa si el operador ya no existe.
 
 ### Disponibilidad y rol
 
-Un operador nuevo arranca `AWAY` (`Operator.java:48`). No hay endpoint para cambiar la disponibilidad ni chequeos por
+Un operador nuevo arranca `AWAY` (`Operator.java:49`). No hay endpoint para cambiar la disponibilidad ni chequeos por
 rol: el rol se guarda y se devuelve en `/api/me`, nada más (P-025).
 
 ## Contrato para los clientes (web/)
@@ -322,8 +327,9 @@ real):
 `backend/src/test/java/com/communicatorone/operators/AuthenticationTest.java` (`@SpringBootTest(RANDOM_PORT)` +
 `TestcontainersConfiguration`, por HTTP con `RestClient`, sin `@Transactional`). Cada test crea dos organizaciones,
 Acme y Globex, con un operador cada una (Ana `OPERATOR` en Acme, Bruno `SUPERVISOR` en Globex), con emails únicos
-porque la suite no limpia la base y el email es único global. El reloj es un `MutableClock` fijo en
-`2026-03-02T09:00:00Z` que se puede adelantar.
+porque la suite no limpia la base y el email es único global. El reloj es un `MutableClock` que arranca en
+`MutableClock.INITIAL_INSTANT` (`2026-03-02T09:00:00Z`), se puede adelantar y vuelve a ese instante después de cada
+test.
 
 | Test | Qué cubre |
 |---|---|
@@ -350,9 +356,11 @@ Otros:
 - `TenantIsolationTest.everyBusinessEntityBelongsToAnOrganization` cubre que `Operator` tenga `@TenantId`.
 
 Fixtures: `OperatorFixture` (mismo paquete de test) crea organizaciones por `JdbcTemplate` y operadores con
-`callAs` + `save(Operator.register(...))`. `TestcontainersConfiguration` registra un secreto JWT solo de test
-(`TestcontainersConfiguration.java:18`, `:26-29`) y el `MutableClock` como `Clock` `@Primary` (`:31-35`), que usan
-tanto la emisión como la validación del token.
+`callAs` + `save(Operator.register(...))`, usando el bean `PasswordEncoder` de la app. `TestcontainersConfiguration`
+registra un secreto JWT solo de test (`TestcontainersConfiguration.java:17`, `:25-28`) y el `MutableClock` como
+`Clock` `@Primary` (`:30-34`), que usan tanto la emisión como la validación del token. `AuthenticationTest` firma los
+tokens armados a mano con el `JwtEncoder` de la app (o con uno de otro secreto, en
+`tokenSignedWithAnotherSecretIsRejected`) y lee el `exp` con el `JwtDecoder` de la app.
 
 Sin test automático, pero verificados a mano contra la app: el 400 por email con espacios alrededor, que una ruta
 protegida sin token responde sin `WWW-Authenticate` y que un Bearer inválido en el login da 401. Tampoco tienen test

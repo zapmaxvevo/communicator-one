@@ -13,13 +13,12 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
-import org.springframework.security.oauth2.server.resource.InvalidBearerTokenException;
 import org.springframework.stereotype.Component;
 
 @Component
 class OperatorTokens implements Converter<Jwt, AbstractAuthenticationToken> {
 
-    private static final String ORGANIZATION_CLAIM = "organization_id";
+    static final String ORGANIZATION_CLAIM = "organization_id";
 
     private final JwtEncoder jwtEncoder;
     private final AuthenticationProperties properties;
@@ -47,19 +46,8 @@ class OperatorTokens implements Converter<Jwt, AbstractAuthenticationToken> {
 
     @Override
     public AbstractAuthenticationToken convert(Jwt jwt) {
-        var operator = new AuthenticatedOperator(uuidClaim(jwt.getSubject()),
-                uuidClaim(jwt.getClaimAsString(ORGANIZATION_CLAIM)));
+        var operator = new AuthenticatedOperator(UUID.fromString(jwt.getSubject()),
+                UUID.fromString(jwt.getClaimAsString(ORGANIZATION_CLAIM)));
         return UsernamePasswordAuthenticationToken.authenticated(operator, null, List.of());
-    }
-
-    private static UUID uuidClaim(String value) {
-        if (value == null) {
-            throw new InvalidBearerTokenException("The access token does not identify an operator");
-        }
-        try {
-            return UUID.fromString(value);
-        } catch (IllegalArgumentException malformedIdentifier) {
-            throw new InvalidBearerTokenException("The access token does not identify an operator");
-        }
     }
 }

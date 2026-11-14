@@ -4,7 +4,6 @@ import com.communicatorone.organizations.CurrentOrganization;
 import java.util.Locale;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 class OperatorFixture {
@@ -12,13 +11,14 @@ class OperatorFixture {
     private final CurrentOrganization currentOrganization;
     private final OperatorRepository operators;
     private final JdbcTemplate jdbcTemplate;
-    private final PasswordEncoder passwordEncoder = PasswordEncoderFactories.createDelegatingPasswordEncoder();
+    private final PasswordEncoder passwordEncoder;
 
     OperatorFixture(CurrentOrganization currentOrganization, OperatorRepository operators,
-            JdbcTemplate jdbcTemplate) {
+            JdbcTemplate jdbcTemplate, PasswordEncoder passwordEncoder) {
         this.currentOrganization = currentOrganization;
         this.operators = operators;
         this.jdbcTemplate = jdbcTemplate;
+        this.passwordEncoder = passwordEncoder;
     }
 
     UUID organization(String name) {

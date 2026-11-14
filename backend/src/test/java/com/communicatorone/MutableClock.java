@@ -8,11 +8,9 @@ import java.time.ZoneOffset;
 
 public final class MutableClock extends Clock {
 
-    private volatile Instant now;
+    public static final Instant INITIAL_INSTANT = Instant.parse("2026-03-02T09:00:00Z");
 
-    MutableClock(Instant now) {
-        this.now = now;
-    }
+    private volatile Instant now = INITIAL_INSTANT;
 
     public void setTo(Instant instant) {
         now = instant;
