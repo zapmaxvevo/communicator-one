@@ -4,7 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -32,15 +33,17 @@ class CommunicatorOneApplicationTest {
                 .build();
     }
 
-    @Test
-    void runningApplicationReportsItselfHealthyToAnonymousMonitoring() {
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "/actuator/health",
+            "/actuator/health/liveness",
+            "/actuator/health/readiness"})
+    void healthAndItsProbesReportApplicationUpToAnonymousMonitoring(String healthPath) {
         // Given
-        var healthEndpoint = "/actuator/health";
+        var anonymousRequest = anonymousClient.get().uri(healthPath);
 
         // When
-        var response = anonymousClient.get()
-                .uri(healthEndpoint)
-                .retrieve()
+        var response = anonymousRequest.retrieve()
                 .toEntity(new ParameterizedTypeReference<Map<String, Object>>() {});
 
         // Then
@@ -48,16 +51,19 @@ class CommunicatorOneApplicationTest {
         assertThat(response.getBody()).containsEntry("status", "UP");
     }
 
-    @Test
-    void apiRejectsRequestsWithoutCredentials() {
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "/api/organizations",
+            "/v3/api-docs",
+            "/swagger-ui/index.html",
+            "/actuator",
+            "/actuator/env"})
+    void protectedEndpointsRejectRequestsWithoutCredentials(String protectedPath) {
         // Given
-        var protectedEndpoint = "/api/organizations";
+        var anonymousRequest = anonymousClient.get().uri(protectedPath);
 
         // When
-        var response = anonymousClient.get()
-                .uri(protectedEndpoint)
-                .retrieve()
-                .toBodilessEntity();
+        var response = anonymousRequest.retrieve().toBodilessEntity();
 
         // Then
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
