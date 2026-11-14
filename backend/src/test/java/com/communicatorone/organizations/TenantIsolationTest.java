@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 
 import com.communicatorone.TestcontainersConfiguration;
 import jakarta.persistence.EntityManager;
-import jakarta.persistence.EntityManagerFactory;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -22,11 +21,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
-@SpringBootTest
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(TestcontainersConfiguration.class)
 class TenantIsolationTest {
 
@@ -40,13 +38,7 @@ class TenantIsolationTest {
     private TransactionTemplate transactionTemplate;
 
     @Autowired
-    private PlatformTransactionManager transactionManager;
-
-    @Autowired
     private EntityManager entityManager;
-
-    @Autowired
-    private EntityManagerFactory entityManagerFactory;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -171,7 +163,7 @@ class TenantIsolationTest {
     @Test
     void organizationCannotBeSwitchedInsideATransactionalScopeWithoutActualTransaction() {
         // Given
-        var supports = new TransactionTemplate(transactionManager);
+        var supports = new TransactionTemplate(transactionTemplate.getTransactionManager());
         supports.setPropagationBehavior(TransactionDefinition.PROPAGATION_SUPPORTS);
 
         // When
@@ -205,7 +197,9 @@ class TenantIsolationTest {
     @Test
     void everyBusinessEntityBelongsToAnOrganization() {
         // Given
-        var mappingMetamodel = entityManagerFactory.unwrap(SessionFactoryImplementor.class).getMappingMetamodel();
+        var mappingMetamodel = entityManager.getEntityManagerFactory()
+                .unwrap(SessionFactoryImplementor.class)
+                .getMappingMetamodel();
 
         // When
         var businessEntities = mappingMetamodel.streamEntityDescriptors()
