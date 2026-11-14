@@ -7,7 +7,8 @@ Guía para Claude Code (local o en la nube) al trabajar en este repo.
 **Communicator One**: sistema para centralizar todas las comunicaciones con prospectos y clientes. Una persona puede escribir por WhatsApp, Instagram, Messenger, Telegram, email, SMS o webchat, pero para el negocio hay **una sola línea de tiempo** con esa persona, y el equipo la atiende desde **un único lugar**.
 
 Leer antes de trabajar:
-- `docs/vision.md`: la idea, el modelo de dominio y la arquitectura de canales.
+- `docs/vision.md`: la idea, el modelo de dominio y la arquitectura de canales. Su sección «Fuentes» dice de dónde
+  sale (artifact, notas, Delivery Run, OpenDA) y qué clase anterior equivale a cada concepto.
 - `docs/decisiones.md`: lo que ya está decidido. **No re-discutir.**
 - Las tareas: issues de GitHub en el Project «Communicator One» (ver «Dónde están las tareas»).
 

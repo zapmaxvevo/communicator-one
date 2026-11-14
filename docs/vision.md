@@ -111,3 +111,36 @@ Un mismo canal puede tener varios proveedores (ej. WhatsApp vía Meta Cloud API 
 6. Alta de leads por API o formulario.
 
 **Después:** email, SMS, webchat embebible, bot/IA, fusión asistida de duplicados, métricas (primera respuesta, SLA, conversión por fuente y canal), plantillas y campañas salientes, apps de celular, escritorio y terminal, servidor MCP.
+
+## 8. Fuentes
+
+Esta visión y `docs/decisiones.md` salen de estas fuentes. Lo necesario para trabajar ya está escrito en este repo;
+las fuentes sirven para ver el razonamiento completo o cómo se resolvió algo antes.
+
+| Fuente | Dónde | Acceso |
+|---|---|---|
+| Visión ilustrada (diagrama, ejemplo de línea de tiempo, análisis de reparto) | https://claude.ai/artifact/JxPq7baHAZ6Vtyu5KLXLBn | Privado, solo el dueño |
+| Notas semilla originales | `~/work/notas/core-negocio-comunicacion-unificada.md` | Solo en la máquina local |
+| Delivery Run (conversaciones multimedio por prospecto) | `~/work/deliveryrun/run0km/` | Solo en la máquina local |
+| OpenDA (WhatsApp ↔ Slack/CRM) | `~/work/openda/app/` | Solo en la máquina local |
+
+Un agente en la nube no puede leer ninguna: si una tarea necesita algo de ahí, se trae al repo (a este archivo o a
+`docs/decisiones.md`) antes de implementar.
+
+### Equivalencias con el código anterior
+
+Las lecciones de la sección 6 salen de estos dos proyectos.
+
+| Acá | Antes | Archivo | Qué cambia |
+|---|---|---|---|
+| `Message` en la línea de tiempo de `Person` | `Conversacion` (una por prospecto y canal) + `ConversacionMultimedia` (Run) | `run0km/conversaciones/models/conversacion.py`, `conversacion_multimedia.py` | En Run la vista unificada era un agregado encima; acá es el modelo principal. |
+| `ChannelAdapter` | `MedioDeConversacion` y subclases por canal (Run) | `run0km/conversaciones/medios.py` | Mismo patrón, como puerto hexagonal. |
+| Varios proveedores por canal | `GestorDeConversaciones`, `SeleccionDeCanalDeWhatsapp`, WhatsApp vía Meta o vía Cover (Run) | `run0km/conversaciones/gestor.py`, `seleccion_de_canal_de_whatsapp.py`, `meta/canal_de_comunicacion_via_meta.py`, `canal_de_comunicacion_de_whatsapp_via_cover.py` | El core no se entera del proveedor. |
+| `ConversationWindowState` (D-005) | `EstadoDeConversacionDeMeta` + `Abierta`, `EsperandoRespuesta`, `RequiereApertura`, `Bloqueada` (Run) | `run0km/conversaciones/estado_de_conversacion.py` | Se generaliza: cada adaptador devuelve su estado. |
+| `reentryWindow` de `Opportunity` (D-002) | `GrupoDeRepetidos` (Run) | `run0km/prospectos/models/repetidos.py` | Pasa a ser configurable por organización. |
+| `ChannelAccount` | `Telefono` (OpenDA) | `openda/app/whatsapp/models.py` | Generalizado a cualquier canal. |
+| Varias `ContactIdentity` por persona | `BusinessScopedUserId` (OpenDA) | `openda/app/whatsapp/models.py` | Caso real de dos identidades de WhatsApp para la misma persona. |
+| `Message` (`senderType`, `externalId`, `status`) | `Mensaje` (OpenDA) | `openda/app/slack/models.py` | `origen` → `senderType`; `wa_msj_id` → `externalId` normalizado. |
+| `Opportunity` + vista web | `Comunicacion` (OpenDA) | `openda/app/slack/models.py` | En OpenDA estaba atada a WhatsApp + Slack; acá el core es genérico y la vista es web propia. |
+
+Diagrama de conversaciones de Run: `run0km/conversaciones/doc/grafico_conversacion.png`.
