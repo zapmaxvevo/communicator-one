@@ -54,7 +54,7 @@ class MessagingFixture {
                 () -> directory.resolveOrCreate(ContactIdentity.email(email)));
     }
 
-    UUID opportunity(UUID organizationId, UUID personId) {
+    private UUID opportunity(UUID organizationId, UUID personId) {
         return currentOrganization.callAs(organizationId, () -> tracker.recordActivity(personId, "whatsapp"));
     }
 

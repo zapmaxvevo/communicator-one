@@ -8,12 +8,15 @@ import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class MessageTest {
 
     private static final Instant NOW = MutableClock.INITIAL_INSTANT;
     private static final Instant SENT_BY_THE_CUSTOMER_AT = NOW.minusSeconds(40);
+    private static final MessagingFixture.Conversation CONVERSATION = new MessagingFixture.Conversation(
+            UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
 
     @Test
     void deliveryAndReadReportsAdvanceASentMessage() {
@@ -104,8 +107,7 @@ class MessageTest {
     @Test
     void receivedMessageArrivesDeliveredAndOnlyMovesForwardFromThere() {
         // Given
-        var message = Message.received(new ReceivedMessage(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
-                ChannelType.WHATSAPP, "wamid.1", new MessageContent("Hola"), SENT_BY_THE_CUSTOMER_AT), NOW);
+        var message = Message.received(CONVERSATION.received("wamid.1", "Hola", SENT_BY_THE_CUSTOMER_AT), NOW);
         var arrivedAs = message.status();
 
         // When
@@ -122,7 +124,7 @@ class MessageTest {
     @Test
     void messageCannotBeSentAsTheCustomer() {
         // Given
-        var asTheCustomer = sentMessage(SenderType.CUSTOMER);
+        var asTheCustomer = CONVERSATION.sent(SenderType.CUSTOMER, "wamid.1", "Sí, hasta 12 cuotas");
 
         // When
         var rejection = catchThrowable(() -> Message.sent(asTheCustomer, NOW));
@@ -130,6 +132,18 @@ class MessageTest {
         // Then
         assertThat(rejection).isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("A sent message comes from the organization, not the customer");
+    }
+
+    @ParameterizedTest
+    @CsvSource(nullValues = "null", value = {"null, Hola", "'', Hola", "'   ', Hola", "wamid.1, null",
+            "wamid.1, ''"})
+    void receivedMessageWithoutExternalIdOrTextIsRejected(String externalId, String text) {
+        // When
+        var rejection = catchThrowable(() -> Message.received(
+                CONVERSATION.received(externalId, text, SENT_BY_THE_CUSTOMER_AT), NOW));
+
+        // Then
+        assertThat(rejection).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -145,11 +159,6 @@ class MessageTest {
     }
 
     private static Message sentByAnOperator() {
-        return Message.sent(sentMessage(SenderType.OPERATOR), NOW);
-    }
-
-    private static SentMessage sentMessage(SenderType senderType) {
-        return new SentMessage(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), ChannelType.WHATSAPP,
-                senderType, "wamid.1", new MessageContent("Sí, hasta 12 cuotas"));
+        return Message.sent(CONVERSATION.sent(SenderType.OPERATOR, "wamid.1", "Sí, hasta 12 cuotas"), NOW);
     }
 }

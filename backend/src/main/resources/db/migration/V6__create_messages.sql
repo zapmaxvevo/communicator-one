@@ -27,5 +27,4 @@ CREATE INDEX messages_person_id_occurred_at_recorded_at_id_idx
     ON messages (person_id, occurred_at DESC, recorded_at DESC, id DESC);
 CREATE INDEX messages_person_id_channel_account_id_occurred_at_customer_idx
     ON messages (person_id, channel_account_id, occurred_at DESC) WHERE sender_type = 'CUSTOMER';
-CREATE INDEX messages_opportunity_id_person_id_organization_id_idx
-    ON messages (opportunity_id, person_id, organization_id);
+CREATE INDEX messages_opportunity_id_idx ON messages (opportunity_id);

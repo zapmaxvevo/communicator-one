@@ -2,7 +2,6 @@ package com.communicatorone.messaging;
 
 import java.time.Clock;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -25,21 +24,18 @@ public class Timeline {
     }
 
     public RecordedMessage recordReceived(ReceivedMessage received) {
-        Objects.requireNonNull(received, "received");
         requireNoOpenTransaction();
         return record(Message.received(received, clock.instant()));
     }
 
     public RecordedMessage recordSent(SentMessage sent) {
-        Objects.requireNonNull(sent, "sent");
         requireNoOpenTransaction();
         return record(Message.sent(sent, clock.instant()));
     }
 
     @Transactional
     public StatusUpdateOutcome applyStatus(UUID channelAccountId, String externalId, MessageStatus status) {
-        Objects.requireNonNull(channelAccountId, "channelAccountId");
-        Assert.hasText(externalId, "A status report needs the id the provider gave the message");
+        requireProviderKey(channelAccountId, externalId);
         Objects.requireNonNull(status, "status");
         return messages.findByChannelAccountIdAndExternalId(channelAccountId, externalId)
                 .map(message -> message.advanceTo(status)
@@ -49,9 +45,13 @@ public class Timeline {
     }
 
     public boolean isRecorded(UUID channelAccountId, String externalId) {
+        requireProviderKey(channelAccountId, externalId);
+        return messages.findIdByChannelAccountIdAndExternalId(channelAccountId, externalId).isPresent();
+    }
+
+    private static void requireProviderKey(UUID channelAccountId, String externalId) {
         Objects.requireNonNull(channelAccountId, "channelAccountId");
         Assert.hasText(externalId, "A message is recognized by the id its provider gave it");
-        return findIdOf(channelAccountId, externalId).isPresent();
     }
 
     private static void requireNoOpenTransaction() {
@@ -60,20 +60,17 @@ public class Timeline {
     }
 
     private RecordedMessage record(Message message) {
-        var alreadyRecorded = findIdOf(message.channelAccountId(), message.externalId());
+        var alreadyRecorded = messages.findIdByChannelAccountIdAndExternalId(message.channelAccountId(),
+                message.externalId());
         if (alreadyRecorded.isPresent()) {
             return new RecordedMessage(alreadyRecorded.get(), true);
         }
         try {
             return new RecordedMessage(writing.execute(transaction -> messages.saveAndFlush(message).id()), false);
         } catch (DataIntegrityViolationException concurrentRecording) {
-            return findIdOf(message.channelAccountId(), message.externalId())
+            return messages.findIdByChannelAccountIdAndExternalId(message.channelAccountId(), message.externalId())
                     .map(winner -> new RecordedMessage(winner, true))
                     .orElseThrow(() -> concurrentRecording);
         }
-    }
-
-    private Optional<UUID> findIdOf(UUID channelAccountId, String externalId) {
-        return messages.findIdByChannelAccountIdAndExternalId(channelAccountId, externalId);
     }
 }

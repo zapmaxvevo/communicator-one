@@ -13,7 +13,7 @@ public enum MessageStatus {
         this.progress = progress;
     }
 
-    public boolean isAheadOf(MessageStatus other) {
+    boolean isAheadOf(MessageStatus other) {
         return progress > other.progress;
     }
 }

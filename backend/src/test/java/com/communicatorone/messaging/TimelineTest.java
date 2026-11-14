@@ -22,7 +22,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
@@ -446,17 +445,15 @@ class TimelineTest {
         assertThat(fixture.messagesOf(acme)).isEmpty();
     }
 
-    @ParameterizedTest
-    @CsvSource(nullValues = "null", value = {"null, Hola", "'', Hola", "'   ', Hola", "wamid.1, null",
-            "wamid.1, ''"})
-    void receivedMessageWithoutExternalIdOrTextIsRejected(String externalId, String text) {
+    @Test
+    void receivedMessageWithoutExternalIdLeavesNothingInTheTimeline() {
         // Given
         var acme = fixture.organization("Acme");
         var conversation = fixture.conversation(acme);
 
         // When
         var rejection = catchThrowable(() -> receiveIn(acme,
-                conversation.received(externalId, text, SENT_BY_THE_CUSTOMER_AT)));
+                conversation.received("   ", "Hola", SENT_BY_THE_CUSTOMER_AT)));
 
         // Then
         assertThat(rejection).isInstanceOf(IllegalArgumentException.class);
