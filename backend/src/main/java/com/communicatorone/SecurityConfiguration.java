@@ -1,5 +1,7 @@
 package com.communicatorone;
 
+import org.springframework.boot.health.actuate.endpoint.HealthEndpoint;
+import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
@@ -18,7 +20,8 @@ class SecurityConfiguration {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(requests -> requests
-                        .requestMatchers("/actuator/health", "/error").permitAll()
+                        .requestMatchers(EndpointRequest.to(HealthEndpoint.class)).permitAll()
+                        .requestMatchers("/error").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))

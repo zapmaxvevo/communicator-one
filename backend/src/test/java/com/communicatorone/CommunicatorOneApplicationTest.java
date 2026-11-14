@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -56,6 +58,55 @@ class CommunicatorOneApplicationTest {
         // When
         var response = anonymousClient.get()
                 .uri(protectedEndpoint)
+                .retrieve()
+                .toBodilessEntity();
+
+        // Then
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/actuator/health/liveness", "/actuator/health/readiness"})
+    void orchestratorProbesReportApplicationUpWithoutCredentials(String probe) {
+        // Given
+        var anonymousOrchestrator = anonymousClient;
+
+        // When
+        var response = anonymousOrchestrator.get()
+                .uri(probe)
+                .retrieve()
+                .toEntity(new ParameterizedTypeReference<Map<String, Object>>() {});
+
+        // Then
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).containsEntry("status", "UP");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/v3/api-docs", "/swagger-ui/index.html"})
+    void apiDocumentationRejectsVisitorsWithoutCredentials(String documentationPage) {
+        // Given
+        var anonymousVisitor = anonymousClient;
+
+        // When
+        var response = anonymousVisitor.get()
+                .uri(documentationPage)
+                .retrieve()
+                .toBodilessEntity();
+
+        // Then
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/actuator", "/actuator/env"})
+    void operationalEndpointsOtherThanHealthRejectRequestsWithoutCredentials(String operationalEndpoint) {
+        // Given
+        var anonymousVisitor = anonymousClient;
+
+        // When
+        var response = anonymousVisitor.get()
+                .uri(operationalEndpoint)
                 .retrieve()
                 .toBodilessEntity();
 

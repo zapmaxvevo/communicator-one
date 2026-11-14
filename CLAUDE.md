@@ -67,11 +67,18 @@ Backend, desde `backend/`:
 curl -s localhost:8080/actuator/health     # {"groups":["liveness","readiness"],"status":"UP"}
 ```
 
-Solo las rutas exactas `/actuator/health` y `/error` son públicas; todo lo demás (incluidos
-`/actuator/health/liveness`, `/actuator/health/readiness`, Swagger y `/v3/api-docs`) responde 401 hasta el issue #5
-(JWT). Los tests de integración importan `TestcontainersConfiguration` (`@Import`), que levanta con Docker su propio
-PostgreSQL (no usa el de compose), compartido por toda la corrida con `@ServiceConnection`. Las migraciones Flyway van
-en `src/main/resources/db/migration` (ubicación por defecto; todavía no hay ninguna).
+Son públicos `/error` y el endpoint de health con sus subrutas (`/actuator/health/liveness` y
+`/actuator/health/readiness`, para las probes), por el matcher de actuator `EndpointRequest.to(HealthEndpoint.class)`,
+que sigue al base-path y al puerto de management (`SecurityConfiguration`). Todo lo demás (el resto de
+actuator, Swagger, `/v3/api-docs` y `/api/**`) responde 401 hasta el issue #5 (JWT). Los tests de integración
+importan `TestcontainersConfiguration` (`@Import`), que levanta con Docker su propio PostgreSQL (no usa el de
+compose), compartido por toda la corrida con `@ServiceConnection`. Las migraciones Flyway van en
+`src/main/resources/db/migration` (ubicación por defecto; todavía no hay ninguna).
+
+El wrapper verifica la distribución de Maven con `distributionSha256Sum`, en
+`.mvn/wrapper/maven-wrapper.properties`. Si se cambia la versión en `distributionUrl`, hay que actualizarlo: bajar el
+zip, verificarlo contra el `.sha512` oficial de Maven Central y poner su `sha256sum`. URL y hash cambian en el mismo
+commit.
 
 ## Glosario (dominio en español → código en inglés)
 
