@@ -80,19 +80,28 @@ Quien llama a `resolveOrCreate`:
 3. **Construye la `ContactIdentity` antes**, y atrapa `InvalidContactIdentityException` si el dato que trae el proveedor
    no es válido.
 
-Orden para el flujo entrante (#10): tres transacciones, una por paso. La persona se confirma en la suya **antes** de
-la oportunidad (`OpportunityTracker.recordActivity`, con su propia transacción; ver `docs/oportunidades.md`) y del
-mensaje (#8). El mensaje duplicado se descarta por `externalId` antes de `recordActivity`, para que un reenvío del
-proveedor no cuente como actividad.
+Orden para el flujo entrante (#10): tres transacciones de escritura, una por paso (más la de solo lectura de
+`isRecorded`). La persona se confirma en la suya **antes** de la oportunidad (`OpportunityTracker.recordActivity`, con
+su propia transacción; ver `docs/oportunidades.md`) y del mensaje (`Timeline.recordReceived`, también con la suya; ver
+`docs/mensajes.md`). El mensaje duplicado se descarta con `Timeline.isRecorded` antes de `recordActivity`, para que un
+reenvío del proveedor no cuente como actividad.
 
 ```java
 currentOrganization.callAs(organizationId, () -> {
-    var personId = personDirectory.resolveOrCreate(identity);               // tx 1
-    // #10 descarta acá el duplicado por externalId
-    var opportunityId = opportunityTracker.recordActivity(personId, source); // tx 2
-    return messages.record(personId, opportunityId, message);                // tx 3 (#8)
+    var personId = personDirectory.resolveOrCreate(identity);                     // tx 1
+    if (timeline.isRecorded(channelAccountId, externalId)) {                      // solo lectura
+        return null;                                                              // reenvío: no cuenta como actividad
+    }
+    var opportunityId = opportunityTracker.recordActivity(personId, source);      // tx 2
+    var recorded = timeline.recordReceived(new ReceivedMessage(personId, opportunityId, channelAccountId,
+            channel, externalId, content, occurredAt));                           // tx 3
+    // #10 publica «mensaje recibido» solo si !recorded.duplicate()
+    return recorded;
 });
 ```
+
+`isRecorded` no es autoritativo (dos copias en paralelo pueden pasarlo las dos); lo autoritativo es
+`RecordedMessage.duplicate`.
 
 No se envuelve todo el flujo en un `@Transactional`: `resolveOrCreate` y `recordActivity` lo rechazarían. Si lo que
 sigue falla, la persona ya creada queda (sin mensajes), y el reintento del webhook la encuentra en vez de crear otra.

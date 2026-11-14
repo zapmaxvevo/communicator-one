@@ -22,8 +22,9 @@ que nadie toca, con la misma regla y la misma fecha: recorre las organizaciones 
 transacción por organización, cierra las que llevan N días o más sin actividad (ver «Job de cierre»).
 
 `recordActivity` se va a activar con cada mensaje entrante: el flujo entrante (#10) resuelve la persona, registra la
-actividad y guarda el mensaje con el id de la oportunidad (#8). En #36, «actividad» es un mensaje entrante; si los
-salientes cuentan se decide con su tarea. Hoy nadie la llama fuera de los tests.
+actividad y guarda el mensaje con el id de la oportunidad (`Timeline.recordReceived`, #8, ver `docs/mensajes.md`). En
+#36, «actividad» es un mensaje entrante; si los salientes cuentan se decide con su tarea. Hoy nadie la llama fuera de
+los tests.
 
 Fuera de #36 y #37: el responsable y el reparto (#13; la columna `owner_id` existe pero queda nula), el cierre manual
 con `WON`/`LOST` (#15), eventos y endpoints REST.
@@ -81,22 +82,31 @@ Quien llama a `recordActivity`:
 3. **Pasa una persona de la organización activa**, resuelta antes con `PersonDirectory.resolveOrCreate`.
 4. **Pasa la fuente** como etiqueta opaca (por ejemplo, el canal o la campaña). Se valida que tenga texto y se guarda
    tal cual, sin recortar; solo se usa al abrir una oportunidad nueva. Una actividad que continúa o reabre no la cambia.
-5. **Descarta antes los duplicados**: #10 descarta el mensaje repetido por `externalId` antes de llamar, porque cada
-   llamada cuenta como actividad nueva.
+5. **Descarta antes los duplicados**: #10 descarta el mensaje repetido con `Timeline.isRecorded(channelAccountId,
+   externalId)` antes de llamar, porque cada llamada cuenta como actividad nueva.
 
-Flujo entrante (#10), en tres transacciones (persona, oportunidad, mensaje):
+Flujo entrante (#10), en tres transacciones de escritura (persona, oportunidad, mensaje), más la de solo lectura de
+`isRecorded`:
 
 ```java
 currentOrganization.callAs(organizationId, () -> {
-    var personId = personDirectory.resolveOrCreate(identity);               // tx 1
-    // #10 descarta acá el duplicado por externalId
-    var opportunityId = opportunityTracker.recordActivity(personId, source); // tx 2
-    return messages.record(personId, opportunityId, message);                // tx 3 (#8)
+    var personId = personDirectory.resolveOrCreate(identity);                     // tx 1
+    if (timeline.isRecorded(channelAccountId, externalId)) {                      // solo lectura
+        return null;                                                              // reenvío: no cuenta como actividad
+    }
+    var opportunityId = opportunityTracker.recordActivity(personId, source);      // tx 2
+    var recorded = timeline.recordReceived(new ReceivedMessage(personId, opportunityId, channelAccountId,
+            channel, externalId, content, occurredAt));                           // tx 3 (#8)
+    // #10 publica «mensaje recibido» solo si !recorded.duplicate()
+    return recorded;
 });
 ```
 
 Si la tercera falla, la actividad ya quedó registrada (la oportunidad abierta o con `lastActivityAt` adelantado) sin
-mensaje. El reintento del webhook vuelve a llamar a `recordActivity`, que continúa la misma oportunidad.
+mensaje. El reintento del webhook vuelve a llamar a `recordActivity`, que continúa la misma oportunidad. `isRecorded`
+no es autoritativo: dos copias del mismo webhook en paralelo pueden pasarlo las dos y registrar dos actividades, pero
+`recordReceived` guarda un solo mensaje y solo una de las dos recibe `RecordedMessage.duplicate = false` (ver
+`docs/mensajes.md`).
 
 ## Reglas
 
@@ -244,7 +254,7 @@ flowchart TD
 
    `FOR NO KEY UPDATE` choca consigo mismo y con `FOR UPDATE`, así que dos `recordActivity` de la misma persona se
    serializan igual; no bloquea los `FOR KEY SHARE` que toman las FK de otras tablas que apunten a la oportunidad (por
-   ejemplo, al insertar mensajes de #8).
+   ejemplo, la FK `messages_opportunity_id_person_id_organization_id_fkey` al insertar un mensaje, V6).
 3. Recién entonces lee el reloj (`OpportunityTracker.java:50`). En un mismo nodo, una transacción que esperó el lock
    lee una hora posterior a la de la que lo tenía. Con relojes desfasados entre nodos eso no alcanza, y lo cubre el
    dominio: `recordActivityAt` nunca hace retroceder `lastActivityAt`.
@@ -628,6 +638,17 @@ organización, de las abiertas con `last_activity_at <= now − N`. Al ser parci
 `CREATE INDEX` común, no `CONCURRENTLY`: hoy la tabla no tiene datos productivos (ver `.claude/rules/flyway.md` y
 «Riesgos»).
 
+`backend/src/main/resources/db/migration/V6__create_messages.sql` (#8) agrega a `opportunities`:
+
+```sql
+ALTER TABLE opportunities
+    ADD CONSTRAINT opportunities_id_person_id_organization_id_key UNIQUE (id, person_id, organization_id);
+```
+
+Es redundante con la clave primaria, pero hace falta como destino de la FK de tres columnas
+`messages_opportunity_id_person_id_organization_id_fkey`, que garantiza que un mensaje apunte a una oportunidad de la
+misma persona y organización (`docs/mensajes.md`, «Esquema»).
+
 ## Tests
 
 `backend/src/test/java/com/communicatorone/opportunities/OpportunityTest.java` (sin Spring; N = 7, W = 3 salvo donde
@@ -725,6 +746,9 @@ Fixture (`OpportunitiesFixture`), lo agregado en #37:
   dueño en P-034: que `WON`/`LOST` no se reabran.
 - **V4 agrega un `UNIQUE (id, organization_id)` a `operators`**, tabla del módulo `operators`, para la FK del
   responsable. Alternativa si molesta: agregar esa FK con #13.
+- **V6 (#8) agrega un `UNIQUE (id, person_id, organization_id)` a `opportunities`**, para la FK de los mensajes. Con
+  esa FK, cambiar el `person_id` de una oportunidad con mensajes (fusión de personas, P-030) va a necesitar FK
+  `DEFERRABLE` u `ON UPDATE CASCADE` (`docs/mensajes.md`, «Riesgos»).
 - **Tres transacciones en #10**: si falla el guardado del mensaje, la actividad queda registrada sin mensaje. El
   reintento del webhook continúa la misma oportunidad, pero adelanta otra vez `last_activity_at`.
 - **Hora de procesamiento, no del proveedor**: un webhook que llega tarde (reintentos del proveedor) cuenta como

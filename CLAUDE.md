@@ -26,7 +26,7 @@ backend/openapi.json contrato OpenAPI de la API, exportado por OpenApiSpecTest (
 docker-compose.yml   PostgreSQL 18 y Redis para desarrollo local
 .env.example         variables de entorno (copiar a .env)
 web/                 React 19 + TS estricto + Vite, con ESLint y Vitest (src/{app,features,shared,api})
-docs/                visión, decisiones, multi-tenant, autenticación, personas, oportunidades, equivalencias del backlog
+docs/                visión, decisiones, multi-tenant, autenticación, personas, oportunidades, mensajes, equivalencias del backlog
 scripts/             issues.py (issues, subissues y estados del Project con gh)
 .github/             plantillas de issue (tarea, error) y de PR, workflows de CI
 .claude/             agentes, skills, rules y hooks de Claude Code
