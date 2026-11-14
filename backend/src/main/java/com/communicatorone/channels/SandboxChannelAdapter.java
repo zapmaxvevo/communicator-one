@@ -7,6 +7,7 @@ import com.communicatorone.people.ContactIdentity;
 import com.communicatorone.people.IdentityKind;
 import com.communicatorone.people.InvalidContactIdentityException;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Queue;
 import java.util.UUID;
@@ -14,12 +15,17 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import org.springframework.stereotype.Component;
 import org.springframework.util.Assert;
 import tools.jackson.core.JacksonException;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.cfg.EnumFeature;
 import tools.jackson.databind.json.JsonMapper;
 
 @Component
 class SandboxChannelAdapter implements ChannelAdapter {
 
-    private static final JsonMapper JSON = JsonMapper.shared();
+    private static final JsonMapper JSON = JsonMapper.builder()
+            .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+            .enable(EnumFeature.FAIL_ON_NUMBERS_FOR_ENUMS)
+            .build();
 
     private final Queue<SandboxDelivery> deliveries = new ConcurrentLinkedQueue<>();
 
@@ -53,7 +59,8 @@ class SandboxChannelAdapter implements ChannelAdapter {
             var webhook = JSON.readValue(payload.body(), SandboxWebhook.class);
             Assert.notNull(webhook, "A sandbox webhook is a JSON object");
             return new SandboxNotifications(webhook.inboundMessages(), webhook.statusUpdates());
-        } catch (JacksonException | IllegalArgumentException | InvalidContactIdentityException invalid) {
+        } catch (JacksonException | IllegalArgumentException | InvalidContactIdentityException
+                | DateTimeParseException invalid) {
             throw new InvalidWebhookPayloadException(ChannelType.SANDBOX);
         }
     }
@@ -77,14 +84,15 @@ class SandboxChannelAdapter implements ChannelAdapter {
         }
     }
 
-    record SandboxMessage(String id, SandboxSender from, String text, Instant sentAt) {
+    record SandboxMessage(String id, SandboxSender from, String text, String sentAt) {
 
         SandboxMessage {
             Assert.notNull(from, "A sandbox message needs its sender");
+            Assert.notNull(sentAt, "A sandbox message needs its sending time");
         }
 
         InboundMessage inboundTo(String account) {
-            return new InboundMessage(account, from.identity(), id, new MessageContent(text), sentAt);
+            return new InboundMessage(account, from.identity(), id, new MessageContent(text), Instant.parse(sentAt));
         }
 
         @Override

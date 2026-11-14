@@ -188,6 +188,14 @@ class SandboxChannelAdapterTest {
                         {"messages": [%s]}""".formatted(VALID_MESSAGE)),
                 new MalformedPayload("blank account", """
                         {"account": "  ", "messages": [%s]}""".formatted(VALID_MESSAGE)),
+                new MalformedPayload("misspelled messages key", """
+                        {"account": "sandbox-acme", "mesages": [%s]}""".formatted(VALID_MESSAGE)),
+                new MalformedPayload("message with an unknown field", withMessage("""
+                        {"id": "in-1", "from": {"kind": "PHONE", "value": "+5491155550101"},
+                         "text": "Hola", "sentAt": "2026-03-02T08:59:20Z", "channel": "WHATSAPP"}""")),
+                new MalformedPayload("numeric sending time", withMessage("""
+                        {"id": "in-1", "from": {"kind": "PHONE", "value": "+5491155550101"},
+                         "text": "Hola", "sentAt": 1700000000}""")),
                 new MalformedPayload("message without id", withMessage("""
                         {"from": {"kind": "PHONE", "value": "+5491155550101"},
                          "text": "Hola", "sentAt": "2026-03-02T08:59:20Z"}""")),
@@ -207,6 +215,9 @@ class SandboxChannelAdapterTest {
                 new MalformedPayload("unknown identity kind", withMessage("""
                         {"id": "in-1", "from": {"kind": "FAX", "value": "+5491155550101"},
                          "text": "Hola", "sentAt": "2026-03-02T08:59:20Z"}""")),
+                new MalformedPayload("numeric identity kind", withMessage("""
+                        {"id": "in-1", "from": {"kind": 0, "value": "+5491155550101"},
+                         "text": "Hola", "sentAt": "2026-03-02T08:59:20Z"}""")),
                 new MalformedPayload("invalid phone", withMessage("""
                         {"id": "in-1", "from": {"kind": "PHONE", "value": "+54 12"},
                          "text": "Hola", "sentAt": "2026-03-02T08:59:20Z"}""")),
@@ -224,6 +235,10 @@ class SandboxChannelAdapterTest {
                         {"messageId": "sandbox-out-1"}""")),
                 new MalformedPayload("unknown status", withStatus("""
                         {"messageId": "sandbox-out-1", "status": "SEEN"}""")),
+                new MalformedPayload("numeric status", withStatus("""
+                        {"messageId": "sandbox-out-1", "status": 1}""")),
+                new MalformedPayload("status as a numeric string", withStatus("""
+                        {"messageId": "sandbox-out-1", "status": "1"}""")),
                 new MalformedPayload("null status", """
                         {"account": "sandbox-acme", "statuses": [null]}"""));
     }

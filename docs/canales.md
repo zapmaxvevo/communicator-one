@@ -67,7 +67,7 @@ Puerto, registro y adaptador de prueba (#43):
 | `InvalidWebhookPayloadException` | package-private | Unchecked. Mensaje `Invalid <tipo> webhook payload`, sin causa encadenada ni detalle (`InvalidWebhookPayloadException.java:5-10`): el error del parser puede citar fragmentos del payload, como el valor de un teléfono (mismo criterio que `InvalidContactIdentityException`). |
 | `ChannelAdapterRegistry` | package-private | `@Component` que recibe todos los beans `ChannelAdapter` (`ChannelAdapterRegistry.java:15-19`) y los indexa por `type()`. `adapterFor(ChannelType)` (`ChannelAdapterRegistry.java:21-27`). Contrato en «Registro de adaptadores». |
 | `UnsupportedChannelException` | package-private | Unchecked. Mensaje `No channel adapter handles <tipo>` (`UnsupportedChannelException.java:5-10`). |
-| `SandboxChannelAdapter` | package-private | `@Component` del canal `SANDBOX` (`SandboxChannelAdapter.java:19-124`), siempre activo. Parsea el JSON propio del sandbox con records anidados package-private y guarda los envíos en memoria; `hasSentTextTo` es la consulta para los tests. Detalle en «Adaptador `SANDBOX`». |
+| `SandboxChannelAdapter` | package-private | `@Component` del canal `SANDBOX` (`SandboxChannelAdapter.java:22-132`), siempre activo. Parsea el JSON propio del sandbox con records anidados package-private y guarda los envíos en memoria; `hasSentTextTo` es la consulta para los tests. Detalle en «Adaptador `SANDBOX`». |
 
 El `package-info.java` con `@ApplicationModule` ya existía desde el scaffold y `ModularStructureTest` ya declaraba
 `channels`. #42 suma la migración V7 (ver «Esquema»), que además agrega una restricción a `messages`. #43 no tiene
@@ -272,17 +272,17 @@ Un JSON propio (no imita a ningún proveedor), con un objeto por webhook:
 
 | Campo | Regla | Pasa a |
 |---|---|---|
-| `account` | Obligatorio, no en blanco (`SandboxChannelAdapter.java:64`) | `externalAccountId` de todos los mensajes y estados del payload |
-| `messages` | Opcional: ausente o `null` es lista vacía; un elemento `null` es inválido (`SandboxChannelAdapter.java:65-68`) | Un `InboundMessage` por elemento, en orden |
+| `account` | Obligatorio, no en blanco (`SandboxChannelAdapter.java:71`) | `externalAccountId` de todos los mensajes y estados del payload |
+| `messages` | Opcional: ausente o `null` es lista vacía; un elemento `null` es inválido (`SandboxChannelAdapter.java:72-75`) | Un `InboundMessage` por elemento, en orden |
 | `messages[].id` | Obligatorio, no en blanco (lo exige `InboundMessage`, `InboundMessage.java:14`) | `externalId` (único por cuenta, P-042) |
-| `messages[].from` | Obligatorio, objeto con `kind` y `value` (`SandboxChannelAdapter.java:83`) | `sender` |
-| `messages[].from.kind` | Obligatorio (`SandboxChannelAdapter.java:99`); nombre exacto de `IdentityKind`, en mayúsculas: `PHONE`, `EMAIL`, `INSTAGRAM_USER`, `MESSENGER_USER`, `TELEGRAM_USER`. Un nombre desconocido lo rechaza Jackson al leer el enum | `sender.kind` |
-| `messages[].from.value` | Obligatorio; se normaliza con `new ContactIdentity(kind, value)` (`SandboxChannelAdapter.java:102-104`), que también rechaza el valor nulo o en blanco: teléfono a E.164, email a minúsculas, usuarios recortados (`docs/personas.md`) | `sender.value` |
+| `messages[].from` | Obligatorio, objeto con `kind` y `value` (`SandboxChannelAdapter.java:90`) | `sender` |
+| `messages[].from.kind` | Obligatorio (`SandboxChannelAdapter.java:107`); nombre exacto de `IdentityKind`, en mayúsculas: `PHONE`, `EMAIL`, `INSTAGRAM_USER`, `MESSENGER_USER`, `TELEGRAM_USER`. Un nombre desconocido o un número (`0`) los rechaza Jackson al leer el enum | `sender.kind` |
+| `messages[].from.value` | Obligatorio; se normaliza con `new ContactIdentity(kind, value)` (`SandboxChannelAdapter.java:110-112`), que también rechaza el valor nulo o en blanco: teléfono a E.164, email a minúsculas, usuarios recortados (`docs/personas.md`) | `sender.value` |
 | `messages[].text` | Obligatorio y no vacío (lo exige `MessageContent`); se aceptan espacios y no se recorta | `content` |
-| `messages[].sentAt` | Obligatorio (lo exige `InboundMessage`, `InboundMessage.java:16`), instante ISO-8601. No se completa con el reloj | `occurredAt` |
+| `messages[].sentAt` | Obligatorio (`SandboxChannelAdapter.java:91`); texto con un instante ISO-8601, que se convierte con `Instant.parse` (`SandboxChannelAdapter.java:95`). Un desfase (`2026-03-02T05:59:20-03:00`) pasa a UTC; un número, un epoch como texto (`"1700000000"`) o espacios alrededor se rechazan. No se completa con el reloj | `occurredAt` |
 | `statuses` | Opcional, como `messages` | Un `StatusUpdate` por elemento, en orden |
 | `statuses[].messageId` | Obligatorio, no en blanco (lo exige `StatusUpdate`, `StatusUpdate.java:10`): el `externalId` que devolvió `send` | `externalId` |
-| `statuses[].status` | Obligatorio (lo exige `StatusUpdate`, `StatusUpdate.java:11`, que solo pide no nulo); nombre exacto de `MessageStatus`: `SENT`, `FAILED`, `DELIVERED`, `READ`, `DELETED`. El nombre lo controla Jackson al leer el enum | `status` |
+| `statuses[].status` | Obligatorio (lo exige `StatusUpdate`, `StatusUpdate.java:11`, que solo pide no nulo); nombre exacto de `MessageStatus`: `SENT`, `FAILED`, `DELIVERED`, `READ`, `DELETED`. El nombre lo controla Jackson al leer el enum, que también rechaza un número (`1`) o un número como texto (`"1"`) | `status` |
 
 Salida del ejemplo (como en `SandboxChannelAdapterTest`):
 
@@ -299,39 +299,53 @@ sandbox.parseStatusUpdates(payload);
 //  StatusUpdate("sandbox-acme", "sandbox-out-2", FAILED)]
 ```
 
-Por la configuración por defecto de Jackson 3 (`JsonMapper.shared()`, `SandboxChannelAdapter.java:22`), y sin test
-propio: los campos desconocidos se ignoran, el texto después del objeto JSON se rechaza, un `sentAt` con desfase
-(`-03:00`) se convierte a UTC y los escalares se convierten a texto (`"text": 123` es `"123"`). El mapper es estático
-y propio: el formato no depende de la configuración `spring.jackson.*` de la app.
+El mapper es estático y propio, con dos reglas estrictas sobre la configuración por defecto de Jackson 3
+(`SandboxChannelAdapter.java:25-28`):
+
+- `DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES`: un campo desconocido, en la raíz o en cualquier elemento (por
+  ejemplo, `"mesages"` mal escrito o un `"channel"` de más en un mensaje), hace inválido el payload. Así un error de
+  tipeo no se convierte en una lista vacía en silencio.
+- `EnumFeature.FAIL_ON_NUMBERS_FOR_ENUMS`: `kind` y `status` se escriben solo por nombre. Un número (`"kind": 0`,
+  `"status": 1`) o un número como texto (`"status": "1"`) se rechaza en vez de tomarse como posición del enum, que
+  cambiaría de significado si se reordena `IdentityKind` o `MessageStatus`.
+
+El formato no depende de la configuración `spring.jackson.*` de la app.
+
+Otros comportamientos de Jackson 3, sin test propio: el texto después del objeto JSON se rechaza, y en los campos de
+texto (`account`, `id`, `text`, `value`, `messageId`) un escalar se convierte a texto (`"text": 123` es `"123"`).
+`sentAt` no depende de esa conversión: se lee como texto y lo valida `Instant.parse`.
 
 ### Parseo y payloads inválidos
 
-`parseInbound` y `parseStatusUpdates` llaman al mismo privado `parsed` (`SandboxChannelAdapter.java:51-59`), que lee
+`parseInbound` y `parseStatusUpdates` llaman al mismo privado `parsed` (`SandboxChannelAdapter.java:57-66`), que lee
 el JSON en records anidados package-private (`SandboxWebhook`, `SandboxMessage`, `SandboxSender`, `SandboxStatus`,
-`SandboxChannelAdapter.java:61-117`), y arma **las dos** listas en un `SandboxNotifications`
-(`SandboxChannelAdapter.java:55`, `:119-120`). Los records anidados validan solo lo que no valida nadie más: `account`
-y que no haya elementos `null` en `SandboxWebhook` (`SandboxChannelAdapter.java:63-69`), `from` en `SandboxMessage`
-(`:83`) y `kind` en `SandboxSender` (`:99`). El resto lo rechazan, dentro del mismo `try`, los constructores de
-`InboundMessage`, `MessageContent`, `ContactIdentity` y `StatusUpdate` al armar las listas. Como cada llamada arma las dos
+`SandboxChannelAdapter.java:68-125`), y arma **las dos** listas en un `SandboxNotifications`
+(`SandboxChannelAdapter.java:61`, `:127-128`). Los records anidados validan solo lo que no valida nadie más: `account`
+y que no haya elementos `null` en `SandboxWebhook` (`SandboxChannelAdapter.java:70-76`), `from` y `sentAt` en
+`SandboxMessage` (`:90-91`) y `kind` en `SandboxSender` (`:107`). El resto lo rechazan, dentro del mismo `try`,
+`Instant.parse` y los constructores de `InboundMessage`, `MessageContent`, `ContactIdentity` y `StatusUpdate` al armar
+las listas. Como cada llamada arma las dos
 listas, es todo o nada: un estado inválido hace fallar también `parseInbound`, y un mensaje inválido, `parseStatusUpdates`.
 
-Atrapa exactamente `JacksonException`, `IllegalArgumentException` e `InvalidContactIdentityException`
-(`SandboxChannelAdapter.java:56-58`) y lanza `InvalidWebhookPayloadException(SANDBOX)`: mensaje
-«Invalid SANDBOX webhook payload», sin causa encadenada (el error de Jackson o de `ContactIdentity` puede citar el
-payload). No hay `catch (Exception)`: un error que no sea de datos se propaga tal cual.
+Atrapa exactamente `JacksonException`, `IllegalArgumentException`, `InvalidContactIdentityException` y
+`DateTimeParseException` (`SandboxChannelAdapter.java:62-65`) y lanza `InvalidWebhookPayloadException(SANDBOX)`: mensaje
+«Invalid SANDBOX webhook payload», sin causa encadenada (el error de Jackson, de `ContactIdentity` o de `Instant.parse`
+puede citar el payload). No hay `catch (Exception)`: un error que no sea de datos se propaga tal cual.
 
 | Payload | Por qué es inválido |
 |---|---|
 | `esto no es JSON`, `""` | `JacksonException` |
-| `null` (JSON válido) | `readValue` devuelve `null`; lo rechaza `Assert.notNull` (`SandboxChannelAdapter.java:54`) |
+| `null` (JSON válido) | `readValue` devuelve `null`; lo rechaza `Assert.notNull` (`SandboxChannelAdapter.java:60`) |
 | Sin `account`, o `"account": "  "` | `Assert.hasText` de `SandboxWebhook` |
-| Mensaje sin `from` | `Assert` de `SandboxMessage` |
-| Mensaje sin `id` o sin `sentAt` | `Assert` de `InboundMessage` |
+| `"mesages": [...]` (clave mal escrita), un mensaje con `"channel": "WHATSAPP"` de más | Jackson rechaza la propiedad desconocida (`FAIL_ON_UNKNOWN_PROPERTIES`) |
+| Mensaje sin `from` o sin `sentAt` | `Assert` de `SandboxMessage` |
+| Mensaje sin `id` | `Assert` de `InboundMessage` |
 | Mensaje sin `text`, o `"text": ""` | `MessageContent` exige texto no vacío |
 | Remitente sin `value` (`"from": {"kind": "PHONE"}`) | `InvalidContactIdentityException` |
 | `"kind": "FAX"`, `"status": "SEEN"` | Jackson no conoce ese valor del enum |
+| `"kind": 0`, `"status": 1`, `"status": "1"` | Jackson rechaza el número como valor del enum (`FAIL_ON_NUMBERS_FOR_ENUMS`, `InvalidFormatException`) |
 | `"value": "+54 12"` con `PHONE`, `"value": "ana.perez"` con `EMAIL` | `InvalidContactIdentityException` |
-| `"sentAt": "ayer a la tarde"` | Jackson no lo lee como `Instant` |
+| `"sentAt": "ayer a la tarde"`, `"sentAt": 1700000000` | `Instant.parse` lanza `DateTimeParseException` (el número llega como el texto `"1700000000"`) |
 | `"messages": [null]`, `"statuses": [null]` | `Assert.noNullElements` de `SandboxWebhook` |
 | Estado sin `messageId` o sin `status` | `Assert` de `StatusUpdate` |
 
@@ -342,7 +356,7 @@ Un `id` repetido dentro del mismo payload no se rechaza: salen dos `InboundMessa
 deduplicación es la de `Timeline.recordReceived` (P-042).
 
 Los `toString` de los records del parseo no exponen datos personales: `SandboxMessage[<id>]`
-(`SandboxChannelAdapter.java:90-93`) y `SandboxSender[<kind>]` (`SandboxChannelAdapter.java:106-109`); los de
+(`SandboxChannelAdapter.java:98-101`) y `SandboxSender[<kind>]` (`SandboxChannelAdapter.java:114-117`); los de
 `ContactIdentity` y `MessageContent` ya ocultan el valor y el texto.
 
 ### Envíos en memoria y `hasSentTextTo`
@@ -357,10 +371,10 @@ sandbox.hasSentTextTo(ContactIdentity.phone("+5491155550101"), "Hasta 6 cuotas")
 sandbox.hasSentTextTo(ContactIdentity.phone("+5491155550202"), "Sí, hasta 12 cuotas");   // false
 ```
 
-- `send` (`SandboxChannelAdapter.java:41-45`) agrega un `SandboxDelivery(to, content)` a una
-  `ConcurrentLinkedQueue` (`SandboxChannelAdapter.java:24`, `:122-123`) y devuelve `sandbox-<UUID aleatorio>`: dos
+- `send` (`SandboxChannelAdapter.java:47-51`) agrega un `SandboxDelivery(to, content)` a una
+  `ConcurrentLinkedQueue` (`SandboxChannelAdapter.java:30`, `:130-131`) y devuelve `sandbox-<UUID aleatorio>`: dos
   envíos iguales tienen ids distintos. No guarda la cuenta `from` ni la valida (ni su tipo ni `allowsOutbound`).
-- `hasSentTextTo(to, text)` (`SandboxChannelAdapter.java:47-49`, package-private) busca un envío igual: misma
+- `hasSentTextTo(to, text)` (`SandboxChannelAdapter.java:53-55`, package-private) busca un envío igual: misma
   identidad (por tipo y valor normalizado, así que `phone("+54 9 11 5555-0101")` también coincide) y mismo texto
   exacto. No mira la cuenta de origen. Un texto vacío da `IllegalArgumentException` (lo construye como
   `MessageContent`).
@@ -393,15 +407,15 @@ classDiagram
     ChannelAdapter ..> SendResult
 ```
 
-Parseo del sandbox (`SandboxChannelAdapter.java:31-39`, `:51-59`):
+Parseo del sandbox (`SandboxChannelAdapter.java:37-45`, `:57-66`):
 
 ```mermaid
 flowchart TD
-    P["parseInbound / parseStatusUpdates<br/>(WebhookPayload)"] --> R["JsonMapper.shared().readValue<br/>→ SandboxWebhook"]
-    R -->|JSON roto, enum o fecha desconocidos,<br/>falta account, from o kind,<br/>elemento null| X[InvalidWebhookPayloadException<br/>Invalid SANDBOX webhook payload]
+    P["parseInbound / parseStatusUpdates<br/>(WebhookPayload)"] --> R["JSON.readValue (mapper estricto)<br/>→ SandboxWebhook"]
+    R -->|JSON roto, campo o enum desconocidos,<br/>enum como número,<br/>falta account, from, sentAt o kind,<br/>elemento null| X[InvalidWebhookPayloadException<br/>Invalid SANDBOX webhook payload]
     R -->|null| X
     R --> B["arma las dos listas:<br/>InboundMessage (ContactIdentity, MessageContent)<br/>y StatusUpdate"]
-    B -->|falta id, sentAt, messageId o status,<br/>identidad o texto inválidos| X
+    B -->|falta id, messageId o status, fecha inválida,<br/>identidad o texto inválidos| X
     B --> S[SandboxNotifications]
     S -->|parseInbound| I[List de InboundMessage]
     S -->|parseStatusUpdates| U[List de StatusUpdate]
@@ -562,8 +576,8 @@ base). Usa el `SandboxChannelAdapter` real y un adaptador de mentira declarado e
 
 `backend/src/test/java/com/communicatorone/channels/SandboxChannelAdapterTest.java` (#43, unitario, sin Spring ni
 base). Los payloads van en text blocks del propio test (formato propio, P-048), no en `src/test/resources`. `send`
-usa `ChannelAccount.register(SANDBOX, "sandbox-acme", "Pruebas", true)` sin persistir. 8 métodos, 47 ejecuciones
-(el parametrizado corre 20 payloads en los dos métodos de parseo).
+usa `ChannelAccount.register(SANDBOX, "sandbox-acme", "Pruebas", true)` sin persistir. 8 métodos, 59 ejecuciones
+(el parametrizado corre 26 payloads en los dos métodos de parseo).
 
 | Test | Qué cubre |
 |---|---|
@@ -572,12 +586,13 @@ usa `ChannelAccount.register(SANDBOX, "sandbox-acme", "Pruebas", true)` sin pers
 | `sandboxPayloadBecomesStatusUpdatesOfItsAccountInTheOrderTheyArrived` | Tres estados, con `READ` antes que `DELIVERED` para el mismo mensaje: salen tal cual y en el orden del payload (el parser no reordena ni deduplica). |
 | `payloadWithOnlyStatusesHasNoInboundMessages` | Sin `messages`: `parseInbound` da vacío y `parseStatusUpdates`, el estado. |
 | `payloadWithOnlyMessagesHasNoStatusUpdates` | Sin `statuses`: `parseStatusUpdates` da vacío y `parseInbound`, el mensaje. |
-| `malformedSandboxPayloadIsRejected` | Parametrizado, cada caso en `parseInbound` y en `parseStatusUpdates`: no JSON, vacío, `null`, sin `account` o en blanco, mensaje sin `id`, `from`, `text` o `sentAt`, remitente sin `value`, texto vacío, `kind` desconocido, teléfono y email inválidos, fecha mal formada, mensaje `null`, estado sin `messageId` o sin `status`, `status` desconocido y estado `null`. Afirma `InvalidWebhookPayloadException`, el mensaje exacto y que no tiene causa. |
+| `malformedSandboxPayloadIsRejected` | Parametrizado, cada caso en `parseInbound` y en `parseStatusUpdates`: no JSON, vacío, `null`, sin `account` o en blanco, clave `messages` mal escrita, mensaje con un campo desconocido, `sentAt` numérico, mensaje sin `id`, `from`, `text` o `sentAt`, remitente sin `value`, texto vacío, `kind` desconocido o numérico, teléfono y email inválidos, fecha mal formada, mensaje `null`, estado sin `messageId` o sin `status`, `status` desconocido, numérico o como texto numérico, y estado `null`. Afirma `InvalidWebhookPayloadException`, el mensaje exacto y que no tiene causa. |
 | `sendingRecordsTheTextForItsRecipient` | `send` devuelve un id `sandbox-…`; `hasSentTextTo` da `true` para ese destinatario y texto, y `false` con otro texto o con otro destinatario. |
 | `eachSendGetsItsOwnExternalId` | Dos envíos iguales a un email tienen ids distintos. |
 
 Sin test en #43: el registro armado por Spring con los beans reales (lo cubre el primer test de integración de #10) y
-los comportamientos por defecto de Jackson descritos en «Formato del payload del sandbox».
+los comportamientos de Jackson marcados «sin test propio» en «Formato del payload del sandbox», y el `sentAt` con
+desfase horario, con epoch como texto o con espacios alrededor.
 
 `TenantIsolationTest.everyBusinessEntityBelongsToAnOrganization` cubre que `ChannelAccount` lleve `@TenantId`, y
 `ModularStructureTest` que `channels` no use internos de `messaging`, `organizations` ni `people`.
