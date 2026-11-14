@@ -3,6 +3,7 @@ description: Estándares de React + TypeScript para web/
 paths:
   - "web/**/*.ts"
   - "web/**/*.tsx"
+  - "web/**/*.css"
 ---
 
 # Web (React + TypeScript)
@@ -16,8 +17,9 @@ desde `web/`. Esta regla manda sobre la skill global `react-frontend-architectur
   backend.
 
 ## Estructura
-- **Por feature:** `features/<nombre>/{components,hooks,types,utils,styles,assets}`, más `shared/` (`ui/`, `hooks/`,
-  `utils/`, `styles/`), `app/` (shell, rutas, configuración) y `api/` (cliente generado desde el OpenAPI del backend).
+- **Por feature:** `features/<nombre>/{components,hooks,types,utils,assets}`, más `shared/` (`ui/`, `hooks/`,
+  `utils/`, `styles/` con `global.css`), `app/` (shell, rutas, configuración) y `api/` (cliente generado desde el
+  OpenAPI del backend). Los `.module.css` van al lado de su `.tsx`, no en una carpeta aparte (P-013).
 - Features aisladas: nada de imports entre features; lo compartido va a `shared/`.
 - **El cliente generado en `api/` no se edita a mano**: se regenera con el script documentado en `CLAUDE.md`.
 
@@ -38,5 +40,16 @@ desde `web/`. Esta regla manda sobre la skill global `react-frontend-architectur
   soportar el doble montaje de StrictMode y la reconexión sin duplicar mensajes.
 
 ## Estilos
-- Se definen en el issue #3 (scaffold de la web) y se anotan como provisoria en `docs/decisiones.md`; después se agregan a
-  esta regla.
+- **CSS Modules**: `Componente.module.css` al lado de `Componente.tsx`, importado como `styles` (P-013).
+- Valores de color, tipografía, espacio y radio **solo con los tokens** de `shared/styles/global.css` (`--color-*`,
+  `--font-*`, `--line-height-*`, `--space-*`, `--radius-*`), nunca valores sueltos. Si falta uno, se agrega el token
+  ahí.
+- `global.css` (tokens y reset mínimo) se importa una sola vez, en `main.tsx`; nada de otros estilos globales.
+
+## Tests
+- Vitest + Testing Library, en `<Componente>.test.tsx` al lado del componente (P-014). `describe`, `it` y `expect` se
+  importan de `vitest` (sin globals).
+- Nombre en inglés como frase de usuario, en presente: `it("shows ... when ...")`. `describe` solo cuando hay varios
+  escenarios del mismo componente.
+- Given/When/Then con bloques separados por una línea en blanco, **sin comentarios**.
+- Consultas por rol y nombre accesible (`getByRole("heading", { name: ... })`) antes que por texto o `testid`.

@@ -24,7 +24,7 @@ Leer antes de trabajar:
 backend/             Spring Boot 4 + Maven wrapper, paquete raíz com.communicatorone
 docker-compose.yml   PostgreSQL 18 y Redis para desarrollo local
 .env.example         variables de entorno (copiar a .env)
-web/                 React + TS + Vite (prevista, issue #3)
+web/                 React 19 + TS estricto + Vite, con ESLint y Vitest (src/{app,features,shared,api})
 docs/                visión, decisiones, equivalencias del backlog
 scripts/             issues.py (issues, subissues y estados del Project con gh)
 .github/             plantillas de issue (tarea, error) y de PR, workflows de CI
@@ -38,7 +38,8 @@ subpaquete directo nuevo es un módulo más y rompe `ModularStructureTest` a pro
 
 ## Comandos
 
-Requisitos: Java 25 y Docker (para compose y Testcontainers). Los comandos de la web llegan con el issue #3.
+Requisitos: Java 25 y Docker (para compose y Testcontainers); para la web, Node 24 (≥24.14, ver `web/.nvmrc` y
+`engines` de `web/package.json`).
 
 Entorno local, desde la raíz:
 
@@ -73,8 +74,20 @@ Solo las rutas exactas `/actuator/health` y `/error` son públicas; todo lo dem�
 PostgreSQL (no usa el de compose), compartido por toda la corrida con `@ServiceConnection`. Las migraciones Flyway van
 en `src/main/resources/db/migration` (ubicación por defecto; todavía no hay ninguna).
 
+Web, desde `web/`:
+
+```bash
+npm ci                                   # dependencias exactas de package-lock.json
+npm run dev                              # servidor de desarrollo de Vite
+npm run lint                             # ESLint (el hook ya corre eslint --fix al editar)
+npm test                                 # Vitest con jsdom, una corrida
+npx vitest run src/app/App.test.tsx      # un archivo puntual
+npm run build                            # tsc -b y vite build a dist/
+```
+
 CI: `.github/workflows/backend.yml` corre `./mvnw verify` en push a `main` y en todo PR que toque `backend/`
-(cualquier base, también apilados). No hay checks requeridos (P-012): mirar que el PR esté en verde antes de mergear.
+(cualquier base, también apilados); `.github/workflows/web.yml` hace lo mismo para `web/` con `npm ci`, lint, tests y
+build. No hay checks requeridos (P-012): mirar que el PR esté en verde antes de mergear.
 
 ## Glosario (dominio en español → código en inglés)
 
