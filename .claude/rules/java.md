@@ -15,8 +15,8 @@ Para tests seguí `tests.md`; para migraciones, `flyway.md`.
   `AssignmentStrategy`, `AttentionTimer`). La documentación de `docs/` va en español.
 
 ## Módulos y capas
-- Un módulo de Spring Modulith por concepto (`organizations`, `people`, `opportunities`, `messaging`, `channels`,
-  `assignment`, `notifications`). El paquete raíz del módulo es su API pública; los subpaquetes son internos y nadie
+- Un módulo de Spring Modulith por concepto (`organizations`, `operators`, `people`, `opportunities`, `messaging`,
+  `channels`, `assignment`, `notifications`). El paquete raíz del módulo es su API pública; los subpaquetes son internos y nadie
   de afuera los importa. `ApplicationModules.verify()` tiene que pasar siempre.
 - Entre módulos: llamadas a la API pública o eventos de dominio. Efectos que no tienen que bloquear al que publica
   (notificar por WebSocket, arrancar un temporizador) van por evento, después del commit.
@@ -71,7 +71,39 @@ y local sobre un enum propio del módulo está bien; lo que se evita es repartir
 ## Persistencia y transacciones
 - `@Transactional` en el caso de uso (servicio de aplicación), no en controllers ni repositorios. Las lecturas, con
   `readOnly = true`.
-- Toda consulta de negocio filtra por `organizationId`.
+- Multi-tenant (P-018): toda entidad de negocio lleva `@TenantId @Column(name = "organization_id") private UUID
+  organizationId;`, sin setter. Hibernate lo asigna al persistir con la organización activa y filtra por él las
+  consultas JPQL, Criteria, derivadas de Spring Data y `findById`. No se agrega `organizationId` a mano a esas
+  consultas. Los `UPDATE`/`DELETE` masivos por JPQL no están verificados: no confiar en el filtro ahí sin un test de
+  otra organización. `TenantIsolationTest` falla si una entidad de `com.communicatorone` (salvo `Organization`) no lo
+  tiene.
+- La organización activa la da `CurrentOrganization` (módulo `organizations`): el ámbito explícito de `runAs`/`callAs`
+  o, si no hay, el principal autenticado que implementa `OrganizationMember`. Sin ninguno de los dos, las lecturas
+  vuelven vacías y las escrituras fallan.
+- SQL nativo y `JdbcTemplate` **no** pasan por `@TenantId`: filtran por `organization_id` a mano, siempre. Hay dos
+  excepciones, y las dos devuelven solo ids de organización: `OperatorEmailDirectory` (módulo `operators`, P-022)
+  busca por email sin filtrar organización porque el login todavía no tiene una, y el operador se carga después con
+  `callAs` y la lectura filtrada (`docs/autenticacion.md`); `OpportunityClosingJob` (módulo `opportunities`, P-037)
+  lista las organizaciones con oportunidades abiertas y procesa cada una con `runAs` y lecturas filtradas
+  (`docs/oportunidades.md`). Otra consulta que cruce organizaciones se decide en su tarea y se anota como provisoria.
+- Procesos sin usuario (webhooks, jobs, listeners) llaman a `currentOrganization.runAs(organizationId, ...)` **fuera**
+  de la transacción, con el `@Transactional` adentro: la organización se fija al abrir la sesión, y `runAs` lanza
+  `IllegalStateException` si hay sincronización de transacción activa (una transacción o un ámbito `SUPPORTS`) o si ya
+  hay una sesión de JPA ligada al hilo (`TransactionSynchronizationManager.hasResource(entityManagerFactory)`: OSIV,
+  `SYNCHRONIZATION_NEVER` o un `EntityManager` ligado a mano).
+- Los cambios de hilo (`@Async`, executors, `CompletableFuture`) no heredan el ámbito de `runAs` ni el
+  `SecurityContext`: el código que corre en el otro hilo vuelve a abrir su `runAs`.
+- Los eventos de dominio llevan `organizationId`, que se toma del accesor de la entidad (lo asignó Hibernate al
+  persistir). `CurrentOrganization.resolve()` es package-private: fuera de `organizations` no se pregunta la
+  organización activa. Los listeners de eventos que tocan datos de una organización no llevan transacción propia:
+  hacen `runAs(event.organizationId(), ...)` y llaman a un servicio `@Transactional`; no usar
+  `@ApplicationModuleListener` directo para eso. Tampoco un `@TransactionalEventListener(phase = AFTER_COMMIT)`
+  síncrono: corre con la sincronización de la transacción todavía activa y `runAs` lanza `IllegalStateException`. El
+  listener es `@Async` + `@TransactionalEventListener`, sin `@Transactional`; hace falta `@EnableAsync`, que la app
+  todavía no tiene.
+- La app corre con `spring.jpa.open-in-view: false` (`application.yml`). Con OSIV activo, el `EntityManager` se abre
+  al empezar el request con la organización del usuario y queda ligado al hilo, así que un `runAs` dentro del request
+  lanza `IllegalStateException`.
 - Webhooks idempotentes: restricción única en la base (`externalId` + `ChannelAccount`) y el duplicado se trata como
   éxito.
 - `spring.jpa.hibernate.ddl-auto=validate`. El esquema solo cambia con Flyway.
@@ -79,8 +111,15 @@ y local sobre un enum propio del módulo está bien; lo que se evita es repartir
 ## Configuración y seguridad
 - Propiedades con `@ConfigurationProperties`; credenciales y URLs de proveedores por variables de entorno, listadas en
   `.env.example`. Nunca valores reales en el repo.
+- El cron de un `@Scheduled` va como placeholder `${...}` sin default, con el valor en `application.yml`
+  (`@Scheduled(cron = "${communicator-one.opportunities.closing-cron}")`). Los tests lo desactivan con `"-"`
+  (`Scheduled.CRON_DISABLED`) desde `TestcontainersConfiguration` y llaman al método directamente.
 - Webhooks: validar la firma del proveedor antes de procesar.
-- Logs con SLF4J. Teléfonos, emails y contenido de mensajes no van a logs de nivel `INFO` o superior.
+- Logs con SLF4J. Teléfonos, emails y contenido de mensajes no van a logs de nivel `INFO` o superior. Tampoco a
+  mensajes de excepción ni a `toString`: los value objects con datos personales muestran solo lo que no identifica
+  (como `ContactIdentity`, que imprime `ContactIdentity[PHONE]`).
+- Todo `DataSource` nuevo, armado a mano, lleva `logServerErrorDetail=false` (P-031), como el Hikari autoconfigurado
+  en `application.yml`: así pgjdbc no copia el `Detail` del servidor, con los valores en conflicto, en las excepciones.
 
 ## Estilo
 - **PROHIBIDO ESCRIBIR COMENTARIOS (incluido Javadoc) salvo que se pidan explícitamente.** Los nombres tienen que
