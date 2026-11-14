@@ -21,7 +21,8 @@ desde `web/`. Esta regla manda sobre la skill global `react-frontend-architectur
   `utils/`, `styles/` con `global.css`), `app/` (shell, rutas, configuración) y `api/` (cliente generado desde el
   OpenAPI del backend). Los `.module.css` van al lado de su `.tsx`, no en una carpeta aparte (P-013).
 - Features aisladas: nada de imports entre features; lo compartido va a `shared/`.
-- **El cliente generado en `api/` no se edita a mano**: se regenera con el script documentado en `CLAUDE.md`.
+- **El cliente generado en `api/` no se edita a mano**: se regenera con `npm run generate:api` desde
+  `backend/openapi.json` (P-017). Queda fuera de ESLint, pero lo chequea `tsc`.
 
 ## Componentes y exports
 - **Solo componentes de función y hooks.**
