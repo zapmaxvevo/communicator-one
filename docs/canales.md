@@ -94,7 +94,7 @@ Adaptador de WhatsApp (#47):
 
 | Clase | Visibilidad | Qué hace |
 |---|---|---|
-| `WhatsAppChannelAdapter` | package-private | `@Component` del canal `WHATSAPP` (`WhatsAppChannelAdapter.java:24-25`), siempre activo y sin dependencias (P-052). Parsea el webhook de WhatsApp Cloud API con un mapper no estricto y records anidados package-private (`WhatsAppChannelAdapter.java:77-220`); `send` lanza `UnsupportedOperationException` hasta #12 (`WhatsAppChannelAdapter.java:62-65`). Detalle en «Adaptador `WHATSAPP`». |
+| `WhatsAppChannelAdapter` | package-private | `@Component` del canal `WHATSAPP` (`WhatsAppChannelAdapter.java:25-26`), siempre activo y sin dependencias (P-052). Parsea el webhook de WhatsApp Cloud API con un mapper no estricto y records anidados package-private (`WhatsAppChannelAdapter.java:78-217`); `send` lanza `UnsupportedOperationException` hasta #12 (`WhatsAppChannelAdapter.java:63-66`). Detalle en «Adaptador `WHATSAPP`». |
 
 Pipeline de entrada (#10):
 
@@ -496,12 +496,12 @@ sequenceDiagram
 
 ## Adaptador `WHATSAPP` (`WhatsAppChannelAdapter`)
 
-`WhatsAppChannelAdapter.java:24-221` (#47, P-052, P-053). Es el primer canal real: convierte el cuerpo de un webhook de
+`WhatsAppChannelAdapter.java:25-218` (#47, P-052, P-053). Es el primer canal real: convierte el cuerpo de un webhook de
 WhatsApp Cloud API en `InboundMessage` y `StatusUpdate`. Es un bean siempre activo, sin perfil, propiedad ni
 dependencias, como el sandbox, así que desde #47 `InboundPipeline.receive(WHATSAPP, payload)` funciona. Todavía nadie
 fuera de los tests le pasa webhooks: el endpoint, la verificación (`hub.challenge`) y la firma `X-Hub-Signature-256`
 son de #49. No toma el nombre de perfil (`contacts[].profile.name`, #48) y no envía: `send` lanza
-`UnsupportedOperationException` («Sending through WhatsApp is not supported yet», `WhatsAppChannelAdapter.java:62-65`)
+`UnsupportedOperationException` («Sending through WhatsApp is not supported yet», `WhatsAppChannelAdapter.java:63-66`)
 hasta #12.
 
 En una línea: de cada cambio `messages` saca los mensajes de texto con remitente teléfono y los estados `sent`,
@@ -576,21 +576,21 @@ Como el sandbox, no reordena ni deduplica: el `read` antes del `delivered` sale 
 
 | Payload de Meta | Regla | Pasa a |
 |---|---|---|
-| `object` | Obligatorio y exactamente `whatsapp_business_account` (`WhatsAppChannelAdapter.java:80`); otro valor o ausente es inválido | — |
-| `entry[]`, `entry[].changes[]` | Obligatorios, listas sin `null` (`WhatsAppChannelAdapter.java:81-82`, `:102-103`); vacías dan listas vacías. `entry[].id` y `time` se ignoran | Se recorren en orden (`:85-96`) |
+| `object` | Obligatorio y exactamente `whatsapp_business_account` (`WhatsAppChannelAdapter.java:81`); otro valor o ausente es inválido | — |
+| `entry[]`, `entry[].changes[]` | Obligatorios, listas sin `null` (`WhatsAppChannelAdapter.java:82-83`, `:102-103`); vacías dan listas vacías. `entry[].id` y `time` se ignoran | Se recorren en orden (`:86-96`) |
 | `changes[].field` distinto de `messages`, o ausente | Se ignora sin leer su `value`, que puede tener cualquier forma (`WhatsAppChannelAdapter.java:110-112`) | — |
 | `changes[].value` de un cambio `messages` | Obligatorio: ausente o `null` es inválido (`WhatsAppChannelAdapter.java:113-115`). Se lee como `JsonNode` y se convierte a `WhatsAppValue` solo acá (`:114`) | — |
-| `value.metadata.phone_number_id` | Obligatorio, no en blanco (`WhatsAppChannelAdapter.java:128`, `:152`); sin NUL (lo exigen `InboundMessage` y `StatusUpdate`) | `externalAccountId` de cada mensaje y estado de ese cambio (`:136`) |
+| `value.metadata.phone_number_id` | Obligatorio, no en blanco (`WhatsAppChannelAdapter.java:128`, `:153`); sin NUL (lo exigen `InboundMessage` y `StatusUpdate`) | `externalAccountId` de cada mensaje y estado de ese cambio (`:137`, `:144`) |
 | `value.messages`, `value.statuses` | Opcionales: ausentes o `null` son listas vacías; un elemento `null` es inválido (`WhatsAppChannelAdapter.java:129-132`) | — |
 | `contacts[]`, `errors[]`, `messaging_product`, `display_phone_number` | Se ignoran (`profile.name` es de #48) | — |
-| `messages[].type` distinto de `text`, o ausente | Se ignora sin validar sus campos (`WhatsAppChannelAdapter.java:159-161`); cuenta para el INFO | — |
-| `messages[].from` de un `text` | Se resuelve **primero** (`WhatsAppChannelAdapter.java:162`, `:171-181`): `ContactIdentity.phone("+" + from)`, salvo el prefijo mexicano viejo. Ausente, en blanco o que no es un teléfono posible (un BSUID como `US.13491208655302741918`, `"12"`): el mensaje se ignora sin validar el resto y cuenta para el INFO | `sender` `PHONE` en E.164 |
-| `from` mexicano con el `1` móvil viejo (regex exacta `521\d{10}`, `WhatsAppChannelAdapter.java:36`) | Se pasa `"+52" + from.substring(3)` (`:175`): `5215512345678` da `+525512345678` | `sender` |
+| `messages[].type` distinto de `text`, o ausente | Se ignora sin validar sus campos (`WhatsAppChannelAdapter.java:160-162`); cuenta para el INFO | — |
+| `messages[].from` de un `text` | Se resuelve **primero** (`WhatsAppChannelAdapter.java:163`, `:172-182`): `ContactIdentity.phone("+" + from)`, salvo el prefijo mexicano viejo. Ausente, en blanco o que no es un teléfono posible (un BSUID como `US.13491208655302741918`, `"12"`): el mensaje se ignora sin validar el resto y cuenta para el INFO | `sender` `PHONE` en E.164 |
+| `from` mexicano con el `1` móvil viejo (regex exacta `521\d{10}`, `WhatsAppChannelAdapter.java:37`) | Se pasa `"+52" + from.substring(3)` (`:176`): `5215512345678` da `+525512345678` | `sender` |
 | `messages[].id` | Obligatorio, no en blanco y sin NUL (lo exige `InboundMessage`) | `externalId` |
-| `messages[].timestamp` | Obligatorio: epoch en segundos como texto, `Instant.ofEpochSecond(Long.parseLong(timestamp))` (`WhatsAppChannelAdapter.java:168`). Se acepta lo que acepta `Long.parseLong`, incluido el signo; ausente, no numérico, con espacios o fuera del rango de `Instant` es inválido. Nunca se completa con el reloj | `occurredAt` |
-| `messages[].text.body` | `text` obligatorio (`WhatsAppChannelAdapter.java:166`); `body` no vacío (lo exige `MessageContent`), no se recorta, sin NUL | `content` |
+| `messages[].timestamp` | Obligatorio: epoch en segundos como texto, `Instant.ofEpochSecond(Long.parseLong(timestamp))` (`WhatsAppChannelAdapter.java:168-169`). Se acepta lo que acepta `Long.parseLong`, incluido el signo; ausente, no numérico, con espacios o fuera del rango de `Instant` es inválido. Nunca se completa con el reloj | `occurredAt` |
+| `messages[].text.body` | `text` obligatorio (`WhatsAppChannelAdapter.java:167`); `body` no vacío (lo exige `MessageContent`), no se recorta, sin NUL | `content` |
 | `context`, `referral` y demás campos de un `text` | Se ignoran | — |
-| `statuses[].status` | Obligatorio (`WhatsAppChannelAdapter.java:204`). Mapeo exacto, en minúsculas (`:37-41`): `sent`→`SENT`, `delivered`→`DELIVERED`, `read`→`READ`, `failed`→`FAILED`. Otro valor (`deleted`, `warning`, `seen`, `READ`) se ignora sin validar su `id` (`:207-210`) | `status` |
+| `statuses[].status` | Obligatorio (`WhatsAppChannelAdapter.java:201`). Mapeo exacto, en minúsculas (`:38-42`): `sent`→`SENT`, `delivered`→`DELIVERED`, `read`→`READ`, `failed`→`FAILED`. Otro valor (`deleted`, `warning`, `seen`, `READ`) se ignora sin validar su `id` (`:204-207`) | `status` |
 | `statuses[].id` de un estado mapeado | Obligatorio, no en blanco y sin NUL (lo exige `StatusUpdate`) | `externalId` |
 | `recipient_id`, `timestamp`, `conversation`, `pricing`, `errors` de un estado | Se ignoran (las fallas de envío son de #12) | — |
 
@@ -600,28 +600,28 @@ Se rechaza solo lo que rompe el contrato documentado de Meta en los campos que e
 todavía no modela se ignora, para no perder los mensajes válidos que llegan en el mismo webhook (P-053). Qué responde
 el endpoint en cada caso lo decide #49.
 
-`parseInbound` y `parseStatusUpdates` llaman al mismo privado `parsed` (`WhatsAppChannelAdapter.java:67-75`), que lee
-el cuerpo en `WhatsAppWebhook` y arma **las dos** listas en un `WhatsAppNotifications` (`:85-96`, `:218-220`). Como en
+`parseInbound` y `parseStatusUpdates` llaman al mismo privado `parsed` (`WhatsAppChannelAdapter.java:68-76`), que lee
+el cuerpo en `WhatsAppWebhook` y arma **las dos** listas en un `WhatsAppNotifications` (`:86-96`, `:215-217`). Como en
 el sandbox, es todo o nada: un estado inválido hace fallar también `parseInbound`, y un mensaje inválido,
 `parseStatusUpdates`. Atrapa exactamente `JacksonException`, `IllegalArgumentException` (que incluye
 `NumberFormatException`) y `DateTimeException` (`Instant.ofEpochSecond` fuera de rango) y lanza
 `InvalidWebhookPayloadException(WHATSAPP)`: mensaje «Invalid WHATSAPP webhook payload», sin causa encadenada
-(`WhatsAppChannelAdapter.java:72-74`). `InvalidContactIdentityException`, que no es una `IllegalArgumentException`, no
-se atrapa ahí: la atrapa la resolución del remitente para ignorar el mensaje (`:176-180`).
+(`WhatsAppChannelAdapter.java:73-75`). `InvalidContactIdentityException`, que no es una `IllegalArgumentException`, no
+se atrapa ahí: la atrapa la resolución del remitente para ignorar el mensaje (`:177-181`).
 
 | Payload | Resultado |
 |---|---|
 | `esto no es JSON`, `""`, `[]` | Inválido: `JacksonException` |
-| `null` (JSON válido) | Inválido: `readValue` devuelve `null` y lo rechaza `Assert.notNull` (`WhatsAppChannelAdapter.java:70`) |
-| Sin `object`, o `"object": "page"` | Inválido: `WhatsAppWebhook` (`:80`) |
+| `null` (JSON válido) | Inválido: `readValue` devuelve `null` y lo rechaza `Assert.notNull` (`WhatsAppChannelAdapter.java:71`) |
+| Sin `object`, o `"object": "page"` | Inválido: `WhatsAppWebhook` (`:81`) |
 | Sin `entry`, `"entry": {}`, `"entry": [null]`, entrada sin `changes`, `"changes": [null]` | Inválido: Jackson o los `Assert` de `WhatsAppWebhook` y `WhatsAppEntry` |
 | Cambio `messages` sin `value`, o con `"value": null` | Inválido (`:113`, `:115`) |
-| Cambio `messages` sin `metadata`, sin `phone_number_id` o con `"phone_number_id": "  "` | Inválido (`:128`, `:152`) |
+| Cambio `messages` sin `metadata`, sin `phone_number_id` o con `"phone_number_id": "  "` | Inválido (`:128`, `:153`) |
 | `"messages": {}`, `"statuses": {}`, `"messages": [null]`, `"statuses": [null]` | Inválido: Jackson o `Assert.noNullElements` (`:131-132`) |
 | `text` de un teléfono sin `id`, o con un NUL (`\u0000`) en `id` | Inválido: `InboundMessage` |
 | `text` de un teléfono sin `timestamp`, con `"ayer"` o con `"99999999999999999"` | Inválido: `NumberFormatException` o `DateTimeException` |
-| `text` de un teléfono sin `text`, sin `body`, con `"body": ""` o con un NUL en `body` | Inválido: `Assert.notNull` (`:166`), `MessageContent` o `InboundMessage` |
-| Estado sin `status` | Inválido: `WhatsAppStatus` (`:204`) |
+| `text` de un teléfono sin `text`, sin `body`, con `"body": ""` o con un NUL en `body` | Inválido: `Assert.notNull` (`:167`), `MessageContent` o `InboundMessage` |
+| Estado sin `status` | Inválido: `WhatsAppStatus` (`:201`) |
 | Estado `delivered` sin `id`, o `read` con un NUL en `id` | Inválido: `StatusUpdate` |
 | NUL en `phone_number_id` | Inválido **solo si** ese `value` trae algún mensaje o estado convertible, porque lo rechazan `InboundMessage` o `StatusUpdate`; con solo mensajes o estados ignorados, o sin ninguno, pasa sin producir nada |
 | `"field": "message_template_status_update"` (u otro), o un cambio sin `field` con cualquier `value` | Ignorado: listas vacías |
@@ -638,34 +638,35 @@ y los constructores de `InboundMessage`, `MessageContent` y `StatusUpdate` al ar
 
 «Sin validar sus campos» quiere decir que ninguna regla de dominio mira un mensaje ignorado; Jackson igual lee los
 cinco campos que declara `WhatsAppMessage` (`from`, `id`, `timestamp`, `type`, `text`;
-`WhatsAppChannelAdapter.java:156`), así que un mensaje ignorado con, por ejemplo, un objeto donde va el texto de
+`WhatsAppChannelAdapter.java:157`), así que un mensaje ignorado con, por ejemplo, un objeto donde va el texto de
 `from` haría fallar la lectura. Sin test propio.
 
-**INFO de mensajes ignorados.** `WhatsAppValue.notifications` cuenta, por cada cambio, los mensajes que no salieron
-como `InboundMessage` (`messages.size() - inboundMessages.size()`, `WhatsAppChannelAdapter.java:145`), y
-`parseInbound` loguea una vez por llamada si la suma es mayor que cero (`:51-53`):
+**INFO de mensajes ignorados.** `WhatsAppWebhook.notifications` arma las dos listas una sola vez para todo el
+webhook y cuenta como ignorados los mensajes recibidos en todos los cambios `messages` que no salieron como
+`InboundMessage` (`receivedMessages - inboundMessages.size()`, `WhatsAppChannelAdapter.java:94-95`); `parseInbound`
+loguea una vez por llamada si la cantidad es mayor que cero (`:52-54`):
 
 ```
-Ignored 4 inbound WHATSAPP messages of unsupported types
+Ignored 4 inbound WHATSAPP messages
 ```
 
-Lleva solo la cantidad: ni tipos, ni ids, ni remitentes. Cuenta también los `text` de remitentes sin teléfono, aunque
-el texto diga «unsupported types». `parseStatusUpdates` no loguea y los estados ignorados no se cuentan. Con un payload
+Lleva solo la cantidad: ni tipos, ni ids, ni remitentes. Cuenta tanto los tipos no soportados como los `text` de
+remitentes sin teléfono. `parseStatusUpdates` no loguea y los estados ignorados no se cuentan. Con un payload
 inválido no hay INFO: la excepción sale antes. Como `InboundPipeline.receive` llama a `parseInbound` una vez, queda un
 INFO por webhook.
 
 ### Strictness de Jackson
 
-El mapper es estático y propio (`WhatsAppChannelAdapter.java:29-31`), con
+El mapper es estático y propio (`WhatsAppChannelAdapter.java:30-32`), con
 `DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES` desactivado de forma explícita (es el default de Jackson 3, pero
 así queda escrito): Meta suma campos a sus webhooks sin aviso, y un campo nuevo no puede rechazar webhooks reales. Es
 lo contrario del sandbox, cuyo formato es propio y estricto para atrapar errores de tipeo (P-048). No depende de
 `spring.jackson.*`.
 
 - Sin `EnumFeature`: `status` y `type` se leen como texto y se comparan exacto con las constantes
-  (`WhatsAppChannelAdapter.java:33-41`), así que un estado o un tipo nuevo de Meta se ignora en vez de romper.
+  (`WhatsAppChannelAdapter.java:34-42`), así que un estado o un tipo nuevo de Meta se ignora en vez de romper.
 - Sin estrategia `SNAKE_CASE`: el único nombre con guion bajo que se lee, `phone_number_id`, lleva `@JsonProperty`
-  (`WhatsAppChannelAdapter.java:149`).
+  (`WhatsAppChannelAdapter.java:150`).
 - El `value` de un cambio es `JsonNode` (`WhatsAppChannelAdapter.java:107`) y se convierte con `JSON.treeToValue` solo
   para `field = messages`: los otros campos del webhook (plantillas, calidad del número, cuenta) tienen otras formas y
   no se validan.
@@ -676,14 +677,15 @@ lo contrario del sandbox, cuyo formato es propio y estricto para atrapar errores
   darían listas vacías en silencio, no un rechazo.
 
 Los `toString` de los records que llevan datos personales los ocultan (`WhatsAppChannelAdapter.java:119-122`,
-`:183-186`, `:195-198`, `:212-215`): `WhatsAppChange[<field>]`, `WhatsAppMessage[<type>]`, `WhatsAppText[body]` y
+`:184-187`, `:192-195`, `:209-212`): `WhatsAppChange[<field>]`, `WhatsAppMessage[<type>]`, `WhatsAppText[body]` y
 `WhatsAppStatus[<status>]`.
 
 ### Payloads de ejemplo
 
 `backend/src/test/resources/channels/whatsapp/`, con la forma que documenta Meta y datos ficticios (cuenta
 `106540352242922`, remitentes `5491155550101` y `34612345678`, timestamps `1772441960` = 2026-03-02T08:59:20Z y
-`1772442065` = 09:01:05Z). Los lee `WhatsAppExamples.payload(nombre)` (`src/test`), con `ClassPathResource` en UTF-8.
+`1772442065` = 09:01:05Z). Los lee `WhatsAppExamples.payload(nombre)` (`src/test`), con `ClassPathResource` en UTF-8;
+`WhatsAppExamples.PHONE_NUMBER_ID` y `TEXT_MESSAGE_ID` son la cuenta y el `wamid` de `text-message.json`.
 Las variantes inválidas o sintéticas van en text blocks de `WhatsAppChannelAdapterTest`.
 
 | Archivo | Qué trae |
@@ -698,7 +700,7 @@ Las variantes inválidas o sintéticas van en text blocks de `WhatsAppChannelAda
 
 ### Diagrama
 
-Parseo de WhatsApp (`WhatsAppChannelAdapter.java:48-60`, `:67-75`, `:85-216`):
+Parseo de WhatsApp (`WhatsAppChannelAdapter.java:49-61`, `:68-76`, `:86-213`):
 
 ```mermaid
 flowchart TD
@@ -759,7 +761,7 @@ void receive(ChannelType channelType, WebhookPayload payload)
   argumentos: un tipo nulo falla en el mapa del registro (`NullPointerException`), un `WebhookPayload` nulo falla en el
   adaptador (`NullPointerException` de `payload.body()` en `SandboxChannelAdapter.parsed`, que no está entre las
   excepciones que atrapa, `SandboxChannelAdapter.java:59`, `:62-63`, y lo mismo en `WhatsAppChannelAdapter.parsed`,
-  `WhatsAppChannelAdapter.java:69`, `:72`; no es `InvalidWebhookPayloadException`) y el
+  `WhatsAppChannelAdapter.java:70`, `:73`; no es `InvalidWebhookPayloadException`) y el
   contenido del payload lo valida el adaptador. Se llama **sin transacción ni sesión de JPA abiertas** y sin
   organización activa: la organización sale de cada cuenta.
 - **Salida:** nada. Los efectos son los registros en la base (persona e identidad, oportunidad, mensaje, estado) y el
@@ -1133,8 +1135,11 @@ beans reales lo cubre desde #10 `InboundPipelineTest`, que usa el `InboundPipeli
 
 `backend/src/test/java/com/communicatorone/channels/WhatsAppChannelAdapterTest.java` (#47, unitario, sin Spring ni
 base: `new WhatsAppChannelAdapter()`). Los payloads reales salen de `src/test/resources/channels/whatsapp/` con
-`WhatsAppExamples.payload` (ver «Payloads de ejemplo»); las variantes, de text blocks armados con los helpers
-`withMessage`, `withStatus`, `webhook` y `webhookWithValue`. Cada escenario afirma las dos listas. 13 métodos, 82
+`WhatsAppExamples.payload` (ver «Payloads de ejemplo»), que además da las constantes del ejemplo
+`PHONE_NUMBER_ID` y `TEXT_MESSAGE_ID`; las variantes, de text blocks armados con los helpers `withMessage`,
+`withStatus`, `webhook` y `webhookWithValue` y la constante `METADATA`. Los mensajes esperados son las constantes
+`ANA_ASKS_FOR_FINANCING` y `JUAN_ASKS_ABOUT_SHIPPING`, y los casos inválidos son `Named` (`malformedPayloads()`,
+cruzado con los dos parseos en `malformedPayloadsInBothParsings`). Cada escenario afirma las dos listas. 13 métodos, 82
 ejecuciones (el de payloads inválidos corre 33 casos en los dos métodos de parseo; el de remitentes sin teléfono, 5).
 
 | Test | Qué cubre |
@@ -1168,15 +1173,16 @@ WhatsApp; el único fake es el reloj (`MutableClock`, fijado en
 - `ChannelsFixture.sandboxAccount(organizationId)`: registra una cuenta `SANDBOX` con id externo al azar y devuelve
   `SandboxAccount(id, organizationId, externalAccountId)`.
 - `InboundPipelineFixture`: arma los payloads (`messagesTo`, `statusesTo`, text block con el formato de P-048; desde
-  #47, `whatsAppTextTo(phoneNumberId)`, que toma `text-message.json` y reemplaza como texto el `phone_number_id` de
-  ejemplo por el de la cuenta del test), siembra
-  una conversación (`conversationWith`, con `resolveOrCreate` + `recordActivity`) y un saliente (`operatorReplied`, con
+  #47, `whatsAppTextTo(phoneNumberId)`, que toma `text-message.json`, verifica que contenga
+  `WhatsAppExamples.PHONE_NUMBER_ID` y lo reemplaza como texto por el de la cuenta del test), siembra una
+  conversación (`conversationWith`, con `resolveOrCreate` + `recordActivity`) y un saliente (`operatorReplied`, con
   `Timeline.recordSent`), y consulta la base con `JdbcTemplate` filtrando por organización (`identitiesOf`,
   `opportunitiesOf`, `messagesOf`) o en todas (`identitiesInAnyOrganizationWithValue`,
   `messagesInAnyOrganizationWithExternalId`). Para la carrera, `rivalStartsRecordingMessage` inserta por SQL un mensaje
   sin confirmar y `anotherSessionIsWaitingToWriteMessages` mira `pg_stat_activity`. Las filas se comparan enteras con
-  los records `StoredIdentity`, `StoredOpportunity` y `StoredMessage`, y el evento esperado sale de la fila guardada
-  con `StoredMessage.event(organizationId)`.
+  los records `StoredIdentity`, `StoredOpportunity` y `StoredMessage` (las fábricas `StoredOpportunity.open` y
+  `StoredMessage.received` usan `SANDBOX` por defecto y, desde #47, tienen una sobrecarga que recibe el canal), y el
+  evento esperado sale de la fila guardada con `StoredMessage.event(organizationId)`.
 - `ReceivedMessages`: `@Component` de `src/test` con un `@EventListener` síncrono que junta los `MessageReceived` en
   una `ConcurrentLinkedQueue`; se vacía en `@BeforeEach` y se consulta por organización (`in`) o entera (`all`). No se
   usa `@RecordApplicationEvents` porque está ligado al hilo del test, y la carrera publica desde otro.
@@ -1277,8 +1283,8 @@ Docker: `./mvnw test -Dtest='ChannelAdapterRegistryTest,SandboxChannelAdapterTes
   reacciones, botones y respuestas interactivas se ignoran sin registrar el mensaje, sin crear la persona y sin contar
   como actividad de la oportunidad (una persona que solo manda un audio no abre oportunidad). Son de #11 y todavía
   no tienen subissue (`docs/mensajes.md`, «Solo texto»).
-- **El INFO de ignorados dice «unsupported types»** aunque también cuente remitentes sin teléfono: para distinguirlos
-  hay que mirar el payload, que el log no trae a propósito.
+- **El INFO de ignorados no distingue el motivo**: suma tipos no soportados y remitentes sin teléfono. Para
+  distinguirlos hay que mirar el payload, que el log no trae a propósito.
 - **`send` de WhatsApp no está soportado**: `adapterFor(WHATSAPP).send(...)` lanza `UnsupportedOperationException`
   hasta #12. Hoy nadie llama a `send`.
 - **Mapper no estricto**: si Meta renombrara o moviera un campo que el adaptador usa (`messages`, `statuses`,
