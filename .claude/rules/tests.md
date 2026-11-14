@@ -22,6 +22,11 @@ Corre el dominio real (servicios de aplicación, entidades, repositorios, evento
 observable**. Fake solo del borde externo. **Nunca** `verify(...)` de Mockito ni `@MockitoBean` de objetos propios:
 eso prueba el cableado, no el negocio.
 - Con base: `@SpringBootTest` o `@ApplicationModuleTest` (Spring Modulith) + PostgreSQL con Testcontainers. Nada de H2.
+  Los tests corren **solo** contra Testcontainers: todo test con contexto de Spring y base importa
+  `TestcontainersConfiguration` (`@Import`). Sin él tomaría la base del compose (la URL por defecto de
+  `application.yml`), le aplicaría la migración repetible de test (`R__create_isolation_probe.sql`) y la app normal
+  dejaría de arrancar contra esa base («Validate failed»: migración aplicada que no existe en `main`). Si hace falta
+  el perfil con PostgreSQL embebido de la regla 8 de `CLAUDE.md`, tiene que ser una base efímera.
 - Si la regla es lógica pura (normalizar un teléfono a E.164, calcular el estado de ventana desde la fecha del último
   mensaje del cliente), test sin Spring ni base: más rápido e igual de válido. Sigue siendo un escenario, no un método.
 
@@ -99,6 +104,13 @@ Clases: `<LoQueTesteo>Test`.
 - Datos con **builders en lenguaje de dominio**, agrupados en un objeto (`TestData.organization()...`,
   `people.withWhatsapp("+54...")`), no funciones estáticas sueltas repartidas por los archivos.
 - Setup repetido de un escenario → un objeto fixture del escenario con métodos con nombre de dominio.
+- Los tests que fijan la organización (con `CurrentOrganization.runAs`/`callAs` o autenticando un principal) **no**
+  llevan `@Transactional`: la organización se fija al abrir la sesión, que con `@Transactional` se abre antes del
+  test, y `runAs` dentro de una transacción lanza `IllegalStateException`. Cada test crea sus propias organizaciones y
+  afirma relativo a ellas, sin limpiar la base (ver `TenantIsolationTest`). Si el test autentica un principal en el
+  `SecurityContextHolder`, lo limpia en `@AfterEach`.
+- El aislamiento se prueba con **otra organización**: dos organizaciones con datos cada una, y la consulta o el
+  endpoint bajo la primera no devuelve ni encuentra por id nada de la segunda.
 
 ## No escribas estos
 

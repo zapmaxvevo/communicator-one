@@ -2,6 +2,7 @@
 description: Reglas para migraciones Flyway del backend
 paths:
   - "backend/src/main/resources/db/migration/**"
+  - "backend/src/test/resources/db/migration/**"
 ---
 
 # Migraciones Flyway
@@ -11,7 +12,12 @@ paths:
 - Nombres `V<n>__<descripcion_en_ingles>.sql` con `n` correlativo. Si al actualizar la rama tu número choca con uno
   que entró a `main`, renumerá la tuya (nunca la mergeada).
 - Una tarea, la menor cantidad de migraciones posible: antes de abrir el PR, juntá en una las que creaste en la rama.
-- Toda tabla de negocio lleva `organization_id NOT NULL` con índice.
+- Toda tabla de negocio lleva `organization_id UUID NOT NULL REFERENCES organizations (id)` con su índice
+  (`CREATE INDEX <tabla>_organization_id_idx ON <tabla> (organization_id)`). Es la columna del `@TenantId` de la
+  entidad (P-018), y la FK es lo que rechaza una escritura sin organización activa.
+- Ids `UUID` y tablas en plural snake_case (P-019), como `organizations` en `V1__create_organizations.sql`.
+- Las migraciones de `src/test/resources/db/migration` son solo de test (no se empaquetan): hoy,
+  `R__create_isolation_probe.sql` crea la tabla de la entidad de prueba del aislamiento (P-020).
 - Índices desde el día 1 para lo que consultan los webhooks y la ventana de canal (emisor, receptor, fecha) y
   restricción única para la idempotencia (`external_id` + cuenta de canal).
 - Cuidado con lo que bloquea o rompe al código que sigue corriendo durante el deploy: renombres, `NOT NULL` sin
