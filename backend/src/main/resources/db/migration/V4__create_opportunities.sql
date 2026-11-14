@@ -34,5 +34,3 @@ CREATE TABLE opportunity_settings (
     CONSTRAINT opportunity_settings_inactivity_days_to_close_check CHECK (inactivity_days_to_close > 0),
     CONSTRAINT opportunity_settings_reentry_window_days_check CHECK (reentry_window_days >= 0)
 );
-
-CREATE INDEX opportunity_settings_organization_id_idx ON opportunity_settings (organization_id);

@@ -247,7 +247,8 @@ CREATE INDEX person_identities_person_id_idx ON person_identities (person_id);
 - La restricción `person_identities_organization_id_kind_value_key` (`V3__create_people.sql:18`) es la que hace única
   una identidad por organización y resuelve la carrera (P-029).
 - `person_identities_organization_id_idx` (`V3__create_people.sql:21`) es redundante con ese `UNIQUE`, que empieza por
-  `organization_id`; se deja porque `.claude/rules/flyway.md` lo pide en toda tabla de negocio.
+  `organization_id`; se creó antes de la excepción de `.claude/rules/flyway.md` y se puede borrar en una migración
+  posterior si se quiere.
 - `kind` es `TEXT` sin `CHECK`, como `operators.role`: los tipos nuevos no necesitan migración.
 - La base no normaliza: quien inserte identidades por SQL tiene que guardarlas ya normalizadas (E.164, email en
   minúsculas), o no van a coincidir con las de la app.

@@ -62,8 +62,9 @@ class Opportunity {
     }
 
     boolean recordActivityAt(Instant now, OpportunitySettings settings) {
-        if (isOpen() && !now.isBefore(settings.inactivityEndsAt(lastActivityAt))) {
-            closeAsUnanswered(settings.inactivityEndsAt(lastActivityAt));
+        var inactivityEndsAt = settings.inactivityEndsAt(lastActivityAt);
+        if (isOpen() && !now.isBefore(inactivityEndsAt)) {
+            closeAsUnanswered(inactivityEndsAt);
         }
         if (isOpen()) {
             lastActivityAt = now;

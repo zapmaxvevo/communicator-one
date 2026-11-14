@@ -5,6 +5,7 @@ import java.util.Objects;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.Assert;
@@ -30,10 +31,11 @@ public class OpportunityTracker {
         Assert.hasText(source, "Activity needs the source it came from");
         Assert.state(!TransactionSynchronizationManager.isSynchronizationActive(),
                 "Activity is recorded in its own transaction, not inside an open one");
+        TransactionCallback<UUID> recording = transaction -> currentOpportunityOf(personId, source);
         try {
-            return writing.execute(transaction -> currentOpportunityOf(personId, source));
+            return writing.execute(recording);
         } catch (DataIntegrityViolationException concurrentOpening) {
-            return writing.execute(transaction -> currentOpportunityOf(personId, source));
+            return writing.execute(recording);
         }
     }
 

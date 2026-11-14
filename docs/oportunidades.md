@@ -32,8 +32,8 @@ asigna y filtra Hibernate con `@TenantId` (P-018).
 
 | Clase | Visibilidad | Qué hace |
 |---|---|---|
-| `OpportunityTracker` | pública (API) | `@Service` con `recordActivity(UUID, String): UUID` (`OpportunityTracker.java:28-38`), que valida, abre su transacción con el bean `TransactionTemplate` y reintenta una vez ante `DataIntegrityViolationException`. El trabajo lo hace `currentOpportunityOf` (`OpportunityTracker.java:40-49`). Recibe repositorios, `TransactionTemplate` y `Clock` en el constructor (`OpportunityTracker.java:20-26`). |
-| `Opportunity` | package-private | Entidad de la tabla `opportunities`: `id`, `@TenantId organizationId`, `personId`, `ownerId`, `source`, `status` y `result` (guardados por nombre), `openedAt`, `lastActivityAt`, `closedAt` (`Opportunity.java:17-45`). Fábrica `openFor(personId, source, now)` (`Opportunity.java:58-62`) y regla `recordActivityAt(now, settings)` (`Opportunity.java:64-77`); privados `closeAsUnanswered` y `reopen` (`Opportunity.java:111-122`). Sin setters. |
+| `OpportunityTracker` | pública (API) | `@Service` con `recordActivity(UUID, String): UUID` (`OpportunityTracker.java:29-40`), que valida, abre su transacción con el bean `TransactionTemplate` y reintenta una vez ante `DataIntegrityViolationException`. El trabajo lo hace `currentOpportunityOf` (`OpportunityTracker.java:42-51`). Recibe repositorios, `TransactionTemplate` y `Clock` en el constructor (`OpportunityTracker.java:21-27`). |
+| `Opportunity` | package-private | Entidad de la tabla `opportunities`: `id`, `@TenantId organizationId`, `personId`, `ownerId`, `source`, `status` y `result` (guardados por nombre), `openedAt`, `lastActivityAt`, `closedAt` (`Opportunity.java:17-45`). Fábrica `openFor(personId, source, now)` (`Opportunity.java:58-62`) y regla `recordActivityAt(now, settings)` (`Opportunity.java:64-78`); privados `closeAsUnanswered` y `reopen` (`Opportunity.java:112-123`). Sin setters. |
 | `OpportunityStatus` | package-private | `OPEN`, `CLOSED` (`OpportunityStatus.java:3-6`). |
 | `OpportunityResult` | package-private | `WON`, `LOST`, `NO_RESPONSE` (`OpportunityResult.java:3-7`). En #36 solo se usa `NO_RESPONSE`. |
 | `OpportunitySettings` | package-private | Entidad de la tabla `opportunity_settings`: `id`, `@TenantId organizationId`, `inactivityDaysToClose`, `reentryWindowDays` (`OpportunitySettings.java:22-32`). `of(int, int)` valida (`OpportunitySettings.java:42-46`), `defaults()` da 7 y 3 sin persistir (`OpportunitySettings.java:19-20`, `:48-50`), `inactivityEndsAt` y `allowsReentryAt` hacen las cuentas (`OpportunitySettings.java:52-58`). |
@@ -64,7 +64,7 @@ Quien llama a `recordActivity`:
 
 1. **No tiene una transacción abierta.** La operación abre la suya; si hay sincronización de transacción activa (una
    transacción real o un ámbito `SUPPORTS`), lanza `IllegalStateException` («Activity is recorded in its own
-   transaction, not inside an open one», `OpportunityTracker.java:31-32`). Es la misma comprobación que
+   transaction, not inside an open one», `OpportunityTracker.java:32-33`). Es la misma comprobación que
    `PersonDirectory.resolveOrCreate` (P-029): en PostgreSQL una violación aborta la transacción en curso y el reintento
    necesita una transacción limpia.
 2. **Tiene organización activa:** `currentOrganization.callAs(organizationId, ...)` o un request con operador
@@ -101,7 +101,7 @@ Con L = última actividad, N = `inactivityDaysToClose`, W = `reentryWindowDays`,
 - **Cierre al vuelo**: `recordActivity` cierra la oportunidad vencida antes de decidir, así que el resultado es el
   mismo haya corrido el job (#37) o no.
 - **Reapertura**: vuelve a `OPEN`, borra resultado y `closedAt`, pone `lastActivityAt` = ahora y conserva fuente,
-  responsable y `openedAt` (`Opportunity.java:117-122`). Aplica sea cual sea el resultado del cierre (D-002 literal);
+  responsable y `openedAt` (`Opportunity.java:118-123`). Aplica sea cual sea el resultado del cierre (D-002 literal);
   ver «Riesgos».
 - **Días de 24 h en UTC** (`Duration.ofDays`, `OpportunitySettings.java:53`, `:57`): no se ajustan por horario de
   verano ni por la zona de la organización.
@@ -162,7 +162,7 @@ flowchart TD
     RT -->|vuelve a fallar| X3[se propaga<br/>p. ej. sin organización activa]
 ```
 
-`Opportunity.recordActivityAt` (`Opportunity.java:64-77`):
+`Opportunity.recordActivityAt` (`Opportunity.java:64-78`):
 
 ```mermaid
 flowchart TD
@@ -179,23 +179,23 @@ flowchart TD
 
 ### Validación y transacción (`OpportunityTracker.recordActivity`)
 
-`recordActivity` (`OpportunityTracker.java:28-38`):
+`recordActivity` (`OpportunityTracker.java:29-40`):
 
 1. Rechaza `personId` nulo (`NullPointerException`) y una fuente sin texto (`Assert.hasText`,
-   `IllegalArgumentException` «Activity needs the source it came from»), antes de todo (`OpportunityTracker.java:29-30`).
+   `IllegalArgumentException` «Activity needs the source it came from»), antes de todo (`OpportunityTracker.java:30-31`).
    Así, una fuente vacía se rechaza igual aunque la persona tenga una oportunidad abierta, en la que la fuente no se usa.
-2. Rechaza la sincronización de transacción activa (`OpportunityTracker.java:31-32`).
-3. Corre `currentOpportunityOf` en una transacción del `TransactionTemplate` (`OpportunityTracker.java:34`). Si sale
+2. Rechaza la sincronización de transacción activa (`OpportunityTracker.java:32-33`).
+3. Corre `currentOpportunityOf` en una transacción del `TransactionTemplate` (`OpportunityTracker.java:34-36`). Si sale
    `DataIntegrityViolationException`, la transacción ya se deshizo entera y se corre una vez más, en una transacción
-   nueva (`OpportunityTracker.java:35-36`). Si el reintento también falla, la excepción se propaga.
+   nueva (`OpportunityTracker.java:37-38`). Si el reintento también falla, la excepción se propaga.
 
 ### La oportunidad vigente (`currentOpportunityOf`)
 
-`currentOpportunityOf` (`OpportunityTracker.java:40-49`):
+`currentOpportunityOf` (`OpportunityTracker.java:42-51`):
 
-1. Lee la configuración de la organización activa o, si no tiene fila, los defaults (`OpportunityTracker.java:41`).
+1. Lee la configuración de la organización activa o, si no tiene fila, los defaults (`OpportunityTracker.java:43`).
 2. Trae la última oportunidad de la persona (por `openedAt` descendente, la primera) con lock pesimista de escritura
-   (`OpportunityTracker.java:42`). El filtro de `@TenantId` limita la búsqueda a la organización activa; el índice
+   (`OpportunityTracker.java:44`). El filtro de `@TenantId` limita la búsqueda a la organización activa; el índice
    `opportunities_person_id_opened_at_idx` sirve a esta consulta. El SQL que genera Hibernate (con
    `spring.jpa.show-sql` en una corrida de `OpportunityTrackerTest`) es:
 
@@ -208,25 +208,25 @@ flowchart TD
    `FOR NO KEY UPDATE` choca consigo mismo y con `FOR UPDATE`, así que dos `recordActivity` de la misma persona se
    serializan igual; no bloquea los `FOR KEY SHARE` que toman las FK de otras tablas que apunten a la oportunidad (por
    ejemplo, al insertar mensajes de #8).
-3. Recién entonces lee el reloj (`OpportunityTracker.java:43`). Una transacción que esperó el lock lee una hora
+3. Recién entonces lee el reloj (`OpportunityTracker.java:45`). Una transacción que esperó el lock lee una hora
    posterior a la de la que lo tenía, así que `lastActivityAt` no retrocede.
 4. Si hay oportunidad y `recordActivityAt` devuelve `true` (continuada o reabierta), devuelve su id
-   (`OpportunityTracker.java:44-46`). Los cambios los guarda el dirty checking al confirmar.
+   (`OpportunityTracker.java:46-48`). Los cambios los guarda el dirty checking al confirmar.
 5. Si no hay oportunidad, o la última quedó cerrada y fuera del reingreso, hace `flush` (la vieja se escribe ya
    cerrada) y después `saveAndFlush(Opportunity.openFor(personId, source, now))`, y devuelve el id nuevo
-   (`OpportunityTracker.java:47-48`).
+   (`OpportunityTracker.java:49-50`).
 
 ### La regla (`Opportunity.recordActivityAt`)
 
-`recordActivityAt(now, settings)` (`Opportunity.java:64-77`) devuelve `true` si la oportunidad sigue vigente y `false`
+`recordActivityAt(now, settings)` (`Opportunity.java:64-78`) devuelve `true` si la oportunidad sigue vigente y `false`
 si hace falta una nueva (y entonces queda cerrada):
 
 1. Si está abierta y `now` no es anterior a `settings.inactivityEndsAt(lastActivityAt)` (L + N), la cierra como
-   `NO_RESPONSE` con `closedAt` = L + N (`Opportunity.java:65-67`, `:111-115`).
-2. Si sigue abierta, `lastActivityAt = now` y `true` (`Opportunity.java:68-71`).
+   `NO_RESPONSE` con `closedAt` = L + N (`Opportunity.java:65-68`, `:112-116`).
+2. Si sigue abierta, `lastActivityAt = now` y `true` (`Opportunity.java:69-72`).
 3. Si está cerrada (de antes o recién) y `settings.allowsReentryAt(closedAt, now)` (`now < closedAt + W`,
-   `OpportunitySettings.java:56-58`), la reabre y `true` (`Opportunity.java:72-75`, `:117-122`).
-4. Si no, `false` (`Opportunity.java:76`).
+   `OpportunitySettings.java:56-58`), la reabre y `true` (`Opportunity.java:73-76`, `:118-123`).
+4. Si no, `false` (`Opportunity.java:77`).
 
 Recibe un `Instant` y no un `Clock`: el servicio lee el reloj una sola vez por llamada. `openFor` exige `personId`
 no nulo y fuente con texto (`Opportunity.java:59-60`) y arranca con `openedAt` = `lastActivityAt` = `now`
@@ -293,7 +293,7 @@ sequenceDiagram
 ```
 
 **La trampa del orden de flush.** Al hacer flush, Hibernate ejecuta los `INSERT` antes que los `UPDATE`. Sin el
-`opportunities.flush()` explícito (`OpportunityTracker.java:47`), la nueva se insertaría con la vieja todavía `OPEN` en
+`opportunities.flush()` explícito (`OpportunityTracker.java:49`), la nueva se insertaría con la vieja todavía `OPEN` en
 la base, y el índice parcial rechazaría a la propia transacción. Lo cubre
 `personReturningAfterTheReentryWindowGetsANewOpportunity`, que pasa por ese camino sin concurrencia.
 
@@ -361,8 +361,6 @@ CREATE TABLE opportunity_settings (
     CONSTRAINT opportunity_settings_inactivity_days_to_close_check CHECK (inactivity_days_to_close > 0),
     CONSTRAINT opportunity_settings_reentry_window_days_check CHECK (reentry_window_days >= 0)
 );
-
-CREATE INDEX opportunity_settings_organization_id_idx ON opportunity_settings (organization_id);
 ```
 
 - `operators_id_organization_id_key` (`V4__create_opportunities.sql:1`) es redundante con la clave primaria de
@@ -379,8 +377,6 @@ CREATE INDEX opportunity_settings_organization_id_idx ON opportunity_settings (o
 - `opportunities_person_id_opened_at_idx` (`V4__create_opportunities.sql:24`) sirve a la búsqueda de la última
   oportunidad; `opportunities_owner_id_organization_id_idx` (`:25`) indexa la FK del responsable, para el borrado o
   la actualización de operadores y las consultas por responsable de #13.
-- `opportunity_settings_organization_id_idx` (`V4__create_opportunities.sql:38`) es redundante con el `UNIQUE
-  (organization_id)`; se deja porque `.claude/rules/flyway.md` lo pide en toda tabla de negocio.
 - `status` y `result` son `TEXT` sin `CHECK` de valores, como `operators.role` y `person_identities.kind`.
 
 ## Tests

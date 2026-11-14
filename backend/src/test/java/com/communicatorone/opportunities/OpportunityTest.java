@@ -15,84 +15,85 @@ import org.junit.jupiter.params.provider.ValueSource;
 class OpportunityTest {
 
     private static final Instant OPENED_AT = MutableClock.INITIAL_INSTANT;
-    private static final Duration INACTIVITY_PERIOD = Duration.ofDays(7);
-    private static final Duration REENTRY_WINDOW = Duration.ofDays(3);
+    private static final String SOURCE = "whatsapp";
+    private static final int INACTIVITY_DAYS_TO_CLOSE = 7;
+    private static final int REENTRY_WINDOW_DAYS = 3;
+    private static final Duration INACTIVITY_PERIOD = Duration.ofDays(INACTIVITY_DAYS_TO_CLOSE);
+    private static final Duration REENTRY_WINDOW = Duration.ofDays(REENTRY_WINDOW_DAYS);
+    private static final OpportunitySettings SETTINGS = OpportunitySettings.of(INACTIVITY_DAYS_TO_CLOSE,
+            REENTRY_WINDOW_DAYS);
     private static final Duration ONE_SECOND = Duration.ofSeconds(1);
 
     @Test
     void activityWithinTheInactivityPeriodContinuesTheOpenOpportunity() {
         // Given
-        var settings = OpportunitySettings.of(7, 3);
-        var opportunity = Opportunity.openFor(UUID.randomUUID(), "whatsapp", OPENED_AT);
+        var opportunity = Opportunity.openFor(UUID.randomUUID(), SOURCE, OPENED_AT);
         var justBeforeBecomingInactive = OPENED_AT.plus(INACTIVITY_PERIOD).minus(ONE_SECOND);
 
         // When
-        var stillCurrent = opportunity.recordActivityAt(justBeforeBecomingInactive, settings);
+        var stillCurrent = opportunity.recordActivityAt(justBeforeBecomingInactive, SETTINGS);
 
         // Then
         assertThat(stillCurrent).isTrue();
-        assertOpen(opportunity, "whatsapp", OPENED_AT, justBeforeBecomingInactive);
+        assertOpen(opportunity, justBeforeBecomingInactive);
     }
 
     @Test
     void inactivityIsCountedFromTheLastActivityNotFromTheOpening() {
         // Given
-        var settings = OpportunitySettings.of(7, 3);
-        var opportunity = Opportunity.openFor(UUID.randomUUID(), "whatsapp", OPENED_AT);
-        opportunity.recordActivityAt(OPENED_AT.plus(Duration.ofDays(5)), settings);
+        var opportunity = Opportunity.openFor(UUID.randomUUID(), SOURCE, OPENED_AT);
+        opportunity.recordActivityAt(OPENED_AT.plus(Duration.ofDays(5)), SETTINGS);
         var elevenDaysAfterOpening = OPENED_AT.plus(Duration.ofDays(11));
 
         // When
-        var stillCurrent = opportunity.recordActivityAt(elevenDaysAfterOpening, settings);
+        var stillCurrent = opportunity.recordActivityAt(elevenDaysAfterOpening, SETTINGS);
 
         // Then
         assertThat(stillCurrent).isTrue();
-        assertOpen(opportunity, "whatsapp", OPENED_AT, elevenDaysAfterOpening);
+        assertOpen(opportunity, elevenDaysAfterOpening);
     }
 
     @Test
     void personReturningJustBeforeTheReentryWindowEndsGetsTheSameOpportunityBack() {
         // Given
-        var settings = OpportunitySettings.of(7, 3);
-        var opportunity = Opportunity.openFor(UUID.randomUUID(), "whatsapp", OPENED_AT);
+        var opportunity = Opportunity.openFor(UUID.randomUUID(), SOURCE, OPENED_AT);
         var justBeforeTheReentryWindowEnds = OPENED_AT.plus(INACTIVITY_PERIOD).plus(REENTRY_WINDOW).minus(ONE_SECOND);
 
         // When
-        var stillCurrent = opportunity.recordActivityAt(justBeforeTheReentryWindowEnds, settings);
+        var stillCurrent = opportunity.recordActivityAt(justBeforeTheReentryWindowEnds, SETTINGS);
 
         // Then
         assertThat(stillCurrent).isTrue();
-        assertOpen(opportunity, "whatsapp", OPENED_AT, justBeforeTheReentryWindowEnds);
+        assertOpen(opportunity, justBeforeTheReentryWindowEnds);
     }
 
     @Test
     void personReturningWhenTheReentryWindowEndsNeedsANewOpportunity() {
         // Given
-        var settings = OpportunitySettings.of(7, 3);
-        var opportunity = Opportunity.openFor(UUID.randomUUID(), "whatsapp", OPENED_AT);
+        var opportunity = Opportunity.openFor(UUID.randomUUID(), SOURCE, OPENED_AT);
         var whenTheReentryWindowEnds = OPENED_AT.plus(INACTIVITY_PERIOD).plus(REENTRY_WINDOW);
 
         // When
-        var stillCurrent = opportunity.recordActivityAt(whenTheReentryWindowEnds, settings);
+        var stillCurrent = opportunity.recordActivityAt(whenTheReentryWindowEnds, SETTINGS);
 
         // Then
         assertThat(stillCurrent).isFalse();
-        assertClosedWithoutResponse(opportunity, "whatsapp", OPENED_AT, OPENED_AT.plus(INACTIVITY_PERIOD));
+        assertClosedWithoutResponse(opportunity, OPENED_AT.plus(INACTIVITY_PERIOD));
     }
 
     @Test
     void withoutReentryWindowAPersonReturningAfterTheInactivityPeriodNeedsANewOpportunity() {
         // Given
-        var settings = OpportunitySettings.of(7, 0);
-        var opportunity = Opportunity.openFor(UUID.randomUUID(), "whatsapp", OPENED_AT);
+        var withoutReentryWindow = OpportunitySettings.of(INACTIVITY_DAYS_TO_CLOSE, 0);
+        var opportunity = Opportunity.openFor(UUID.randomUUID(), SOURCE, OPENED_AT);
         var whenTheInactivityPeriodEnds = OPENED_AT.plus(INACTIVITY_PERIOD);
 
         // When
-        var stillCurrent = opportunity.recordActivityAt(whenTheInactivityPeriodEnds, settings);
+        var stillCurrent = opportunity.recordActivityAt(whenTheInactivityPeriodEnds, withoutReentryWindow);
 
         // Then
         assertThat(stillCurrent).isFalse();
-        assertClosedWithoutResponse(opportunity, "whatsapp", OPENED_AT, whenTheInactivityPeriodEnds);
+        assertClosedWithoutResponse(opportunity, whenTheInactivityPeriodEnds);
     }
 
     @ParameterizedTest
@@ -106,22 +107,21 @@ class OpportunityTest {
         assertThat(rejection).isInstanceOf(IllegalArgumentException.class);
     }
 
-    private static void assertOpen(Opportunity opportunity, String source, Instant openedAt, Instant lastActivityAt) {
+    private static void assertOpen(Opportunity opportunity, Instant lastActivityAt) {
         assertThat(opportunity.status()).isEqualTo(OpportunityStatus.OPEN);
         assertThat(opportunity.result()).isNull();
         assertThat(opportunity.closedAt()).isNull();
-        assertThat(opportunity.source()).isEqualTo(source);
-        assertThat(opportunity.openedAt()).isEqualTo(openedAt);
+        assertThat(opportunity.source()).isEqualTo(SOURCE);
+        assertThat(opportunity.openedAt()).isEqualTo(OPENED_AT);
         assertThat(opportunity.lastActivityAt()).isEqualTo(lastActivityAt);
     }
 
-    private static void assertClosedWithoutResponse(Opportunity opportunity, String source, Instant lastActivityAt,
-            Instant closedAt) {
+    private static void assertClosedWithoutResponse(Opportunity opportunity, Instant closedAt) {
         assertThat(opportunity.status()).isEqualTo(OpportunityStatus.CLOSED);
         assertThat(opportunity.result()).isEqualTo(OpportunityResult.NO_RESPONSE);
         assertThat(opportunity.closedAt()).isEqualTo(closedAt);
-        assertThat(opportunity.source()).isEqualTo(source);
+        assertThat(opportunity.source()).isEqualTo(SOURCE);
         assertThat(opportunity.openedAt()).isEqualTo(OPENED_AT);
-        assertThat(opportunity.lastActivityAt()).isEqualTo(lastActivityAt);
+        assertThat(opportunity.lastActivityAt()).isEqualTo(OPENED_AT);
     }
 }
