@@ -1,6 +1,7 @@
 package com.communicatorone;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.fail;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -44,11 +45,10 @@ class OpenApiSpecTest {
 
         // Then
         assertThat(result).hasStatusOk();
-        var upToDate = servedSpec.equals(committedSpec);
-        if (!upToDate) {
+        if (!servedSpec.equals(committedSpec)) {
             Files.writeString(COMMITTED_SPEC, servedSpec);
+            fail(OUT_OF_DATE_MESSAGE);
         }
-        assertThat(upToDate).withFailMessage(OUT_OF_DATE_MESSAGE).isTrue();
     }
 
     private static String withNormalizedLineEndings(String content) {
