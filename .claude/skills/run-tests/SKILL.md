@@ -3,8 +3,8 @@ name: run-tests
 description: Corre los tests del backend (Maven + JUnit 5 + Testcontainers) o de la web (Vitest) con los comandos correctos. Usar cuando se pida correr tests, verificar un cambio o chequear un módulo o test puntual. Opcionalmente recibe una clase, un paquete o un archivo (ej. "PersonTest", "people", "web/src/features/inbox").
 ---
 
-Correr los tests del proyecto. Los comandos definitivos están en `CLAUDE.md` (sección «Comandos»; los de la web llegan
-con el issue #3); si difieren de lo que dice acá, manda `CLAUDE.md`.
+Correr los tests del proyecto. Los comandos definitivos están en `CLAUDE.md` (sección «Comandos»); si difieren de lo
+que dice acá, manda `CLAUDE.md`.
 
 ## Backend (`backend/`)
 
@@ -13,7 +13,7 @@ el wrapper de Maven desde `backend/`:
 
 ```bash
 cd backend && ./mvnw test                      # tests unitarios y de integración que corre surefire
-cd backend && ./mvnw verify                    # build completo con la suite entera (todavía no hay CI)
+cd backend && ./mvnw verify                    # build completo con la suite entera (lo mismo que corre el CI)
 ```
 
 Si `$ARGUMENTS` trae una clase, un método o un módulo, acotá la corrida:
@@ -32,7 +32,7 @@ Si Docker no está disponible, no cambies la configuración para esquivarlo: avi
 ```bash
 cd web && npx vitest run <archivos o carpeta>
 cd web && npm test                             # suite completa
-cd web && npm run lint && npm run build        # lo que corre CI además de los tests
+cd web && npm run lint && npm run build        # lint y build además de los tests
 ```
 
 ## Después de correr

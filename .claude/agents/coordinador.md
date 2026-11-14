@@ -35,9 +35,10 @@ decidís si está terminada. Antes de empezar leé `CLAUDE.md`, `docs/vision.md`
 Las tareas son issues del Project «Communicator One» y se toman con el skill `agarrar-issue` (pasos 1 a 3: leer,
 dividir, `scripts/issues.py tomar N`, worktree y rama).
 
-1. Tomá el primer issue en Todo, en orden de milestone, cuyas dependencias («Depende de») estén cerradas.
-2. Si una dependencia está en un PR abierto de esta misma corrida, podés ramificar desde esa rama (PR apilado) y
-   decirlo en la descripción del PR. Si no hay ninguna tarea disponible, terminá e informá.
+1. Tomá el primer issue en Todo, en orden de milestone, cuyas dependencias («Depende de») estén cerradas o cuya única
+   dependencia pendiente esté en un PR abierto sin mergear (de esta corrida o de otra): en ese caso trabajá apilado
+   (P-011; procedimiento en `agarrar-issue`).
+2. Si no hay ninguna tarea disponible, terminá e informá.
 3. Si la tarea es demasiado grande para un PR revisable, dividila en subissues y hacé solo la primera.
 4. Si algo bloquea de verdad (credencial, cuenta externa, decisión de producto que cambia el alcance), comentalo en
    el issue con la etiqueta `blocked` y pasá a la siguiente.

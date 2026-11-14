@@ -15,12 +15,12 @@ El ciclo está en el `CLAUDE.md` («El ciclo de un issue»). Esto es el orden pa
 Se lee con `gh api` porque `gh issue view` falla en versiones viejas de `gh` (consulta los Projects clásicos).
 
 - Si tiene subissues, se trabaja uno: preguntá cuál o proponé el primero abierto (en modo autónomo, tomá el primero
-  abierto cuyas dependencias estén cerradas).
+  abierto cuyas dependencias estén cerradas o cuya única dependencia pendiente esté en un PR abierto, P-011).
 - Si tiene 2 o más tareas sin tildar (o secciones `### 1.`, `### 2.`), dividilo antes de empezar:
   `python3 scripts/issues.py dividir N` muestra las tareas; juntá las que van en el mismo cambio con `--grupos` y,
   con el OK de quien lo pidió (en modo autónomo, si cada parte es un PR revisable por sí solo), `--hacer`. Seguí con
   un subissue.
-- Revisá «Depende de»: si alguno sigue abierto, no lo empieces (salvo PR apilado, ver `coordinador`).
+- Revisá «Depende de»: si alguno sigue abierto, no lo empieces (salvo PR apilado: P-011 y §3, §5 y §6).
 - Verificá la premisa contra el árbol antes de construir: el issue puede estar viejo (otro PR lo resolvió, el código
   cambió). Si ya no se sostiene, el entregable es eso, con la evidencia, en un comentario en el issue.
 
@@ -32,6 +32,9 @@ Se lee con `gh api` porque `gh issue view` falla en versiones viejas de `gh` (co
 
 No se trabaja en el árbol de `main`: así varias sesiones o agentes no se pisan. Entrá a un worktree con la herramienta
 `EnterWorktree` y renombrá la rama: `git branch -m feature/N-<tema-corto>` (o `fix/N-<tema-corto>` si es `bug`).
+Si se apila (P-011), después de renombrar llevá la rama a la del PR de la dependencia:
+`git fetch origin && git reset --hard origin/<rama-dependencia>` (el worktree recién creado no tiene nada que perder y
+la rama renombrada no queda siguiendo a la dependencia).
 En `web/`, corré `npm ci` dentro del worktree antes de testear.
 
 ## 4. Resolverlo
@@ -54,7 +57,8 @@ gh pr create -R zapmaxvevo/communicator-one --title "<qué cambia, en español e
 ```
 
 El cuerpo sigue `.github/pull_request_template.md` (con `--body`, `gh` no la carga sola): `Closes #N`, qué cambia, por
-qué y cómo se probó, con lo que falló de la suite aunque sea conocido. Pasá el link del PR.
+qué y cómo se probó, con lo que falló de la suite aunque sea conocido. Pasá el link del PR. Si es apilado, agregá
+`--base <rama-dependencia>` y la descripción arranca con «Apilado sobre #N, mergear después».
 
 ## 6. Revisión y merge
 
@@ -67,6 +71,16 @@ qué y cómo se probó, con lo que falló de la suite aunque sea conocido. Pasá
 - El dueño mergea, o pide que se mergee. Nunca se pushea a `main`. Al mergear, el issue pasa a Done y el hook de
   `.claude/settings.json` corre `cerrar-padres` (si se mergea desde la web, correrlo a mano:
   `python3 scripts/issues.py cerrar-padres`).
+- PR apilado (P-011):
+  - Si la dependencia recibe commits nuevos, rebaseá el apilado sobre ella y pusheá: si no, el verde del CI queda
+    viejo.
+  - El repo tiene `delete_branch_on_merge` desactivado: después de mergear la dependencia, cambiá a mano la base del
+    apilado a `main` antes de mergearlo. Si no, se mergea en la rama muerta, no llega a `main` y `Closes #N` (que
+    solo vale contra la rama por defecto) no se aplica. Cambiar la base no dispara `pull_request` (un push nuevo sí):
+    el verde sigue siendo el de la corrida contra la rama de la dependencia, así que hacé un push nuevo (por ejemplo,
+    rebase sobre `origin/main`) para que el CI corra contra `main` antes de mergear.
+  - Si la dependencia se mergeó con squash o rebase, sacá sus commits viejos antes de mergear:
+    `git rebase --onto origin/main <último-commit-viejo-de-la-dependencia>` y `git push --force-with-lease`.
 
 ## 7. El worktree se borra solo
 
