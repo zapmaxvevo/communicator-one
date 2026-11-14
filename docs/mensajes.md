@@ -31,10 +31,10 @@ mensaje ya estaba; eso es lo que #10 usa para publicar el evento «mensaje recib
 Se va a activar desde el flujo entrante (#10), con cada webhook de mensaje; desde el flujo saliente (#12), al enviar; y
 con cada webhook de estado. Hoy nadie la llama fuera de los tests.
 
-Fuera de #8: la tabla `channel_accounts` y su FK desde `messages` (#42, `docs/canales.md`), el adaptador de canal
-(#43), el pipeline entrante y la llamada a `recordActivity` (#10), adjuntos, plantillas y ubicación (#11, #12), la
-ventana de conversación y el envío (#12), la consulta de la línea de tiempo, REST, WebSocket y los no leídos del
-operador (#15), y los eventos (P-009).
+Fuera de #8: la tabla `channel_accounts` y su FK desde `messages` (#42, `docs/canales.md`), el puerto de canal y el
+adaptador `SANDBOX` (#43, `docs/canales.md`), el pipeline entrante y la llamada a `recordActivity` (#10), adjuntos,
+plantillas y ubicación (#11, #12), la ventana de conversación y el envío (#12), la consulta de la línea de tiempo,
+REST, WebSocket y los no leídos del operador (#15), y los eventos (P-009).
 
 ## Piezas
 
@@ -51,7 +51,7 @@ depende de él (desde #42, por `ChannelType`), y la orquestación de entrada (#1
 | `SentMessage` | pública (API) | `record (personId, opportunityId, channelAccountId, ChannelType channel, SenderType senderType, String externalId, MessageContent content)` (`SentMessage.java:5-6`). Sin hora: la pone el reloj. |
 | `MessageContent` | pública (API) | `record (String text)`; el constructor compacto exige texto con `Assert.hasLength` («A message needs its text», `MessageContent.java:7-9`): rechaza nulo y vacío, acepta espacios y no recorta. `toString` devuelve `MessageContent[text]`, sin el texto (`MessageContent.java:11-14`). Hoy es solo texto. |
 | `RecordedMessage` | pública (API) | `record (UUID id, boolean duplicate)` (`RecordedMessage.java:5`): el id del mensaje y si ya estaba registrado. |
-| `ChannelType` | pública (API) | `WHATSAPP`, `INSTAGRAM`, `MESSENGER`, `TELEGRAM`, `EMAIL`, `SMS`, `WEBCHAT` (`ChannelType.java:3-11`). Vive en `messaging` para que `channels` dependa de `messaging` y no al revés. |
+| `ChannelType` | pública (API) | `WHATSAPP`, `INSTAGRAM`, `MESSENGER`, `TELEGRAM`, `EMAIL`, `SMS`, `WEBCHAT` y, desde #43, `SANDBOX`, el canal de prueba (`ChannelType.java:3-12`). Vive en `messaging` para que `channels` dependa de `messaging` y no al revés. |
 | `SenderType` | pública (API) | `CUSTOMER`, `OPERATOR`, `BOT`, `SYSTEM` (`SenderType.java:3-8`). `CUSTOMER` es el único entrante; no hay columna de dirección. |
 | `MessageStatus` | pública (API) | `SENT(0)`, `FAILED(1)`, `DELIVERED(2)`, `READ(3)`, `DELETED(4)`, con el rango en un campo `progress` (`MessageStatus.java:3-14`). El enum es público, pero `isAheadOf(other)` (`true` si el rango es mayor, `MessageStatus.java:16-18`) es package-private: la regla de avance solo la usa `Message.advanceTo`. |
 | `StatusUpdateOutcome` | pública (API) | `ADVANCED`, `UNCHANGED`, `UNKNOWN_MESSAGE` (`StatusUpdateOutcome.java:3-7`). |
@@ -61,8 +61,9 @@ depende de él (desde #42, por `ChannelType`), y la orquestación de entrada (#1
 El `package-info.java` con `@ApplicationModule` ya existía desde el scaffold y `ModularStructureTest` ya declaraba
 `messaging`. #8 suma la migración V6 (ver «Esquema»), que además agrega una restricción a `opportunities`.
 
-Los nombres `InboundMessage` y `StatusUpdate` quedan para lo que devuelve el adaptador de canal (#43, `docs/vision.md`
-§5); `ReceivedMessage` y `SentMessage` son los comandos de `messaging`.
+Los nombres `InboundMessage` y `StatusUpdate` son los de lo que devuelve el adaptador de canal (records
+package-private de `channels` desde #43, `docs/canales.md`, «Puerto de canal»); `ReceivedMessage` y `SentMessage` son
+los comandos de `messaging`.
 
 ## API y contrato
 
@@ -84,7 +85,8 @@ boolean known = timeline.isRecorded(channelAccountId, "wamid.HBgNNTQ5MTE1NTU1MDE
 ```
 
 Pasar del payload del proveedor (por ejemplo, un `statuses[].status = "delivered"` de WhatsApp) a estos comandos es
-trabajo del adaptador (#43, #11): `messaging` no conoce payloads.
+trabajo del adaptador de canal (puerto y sandbox en #43, WhatsApp en #11; `docs/canales.md`) y del pipeline de #10:
+`messaging` no conoce payloads.
 
 | Operación y entrada | Salida |
 |---|---|
@@ -552,13 +554,15 @@ Comando: `./mvnw test -Dtest='MessageTest,TimelineTest'` desde `backend/` (skill
   obliga a resolver la oportunidad de otra forma, porque `ReceivedMessage` la necesita) o aceptar la consulta extra,
   que es barata (búsqueda por índice único).
 
-## Pendiente: #43, #10, #12, #15
+## Pendiente: #10, #12, #15
 
 - **#9 (canales y cuentas)**: hecho en #42 (`docs/canales.md`), con la rama apilada sobre la de #8: V7 crea
   `channel_accounts` y la FK de tres columnas `(channel_account_id, organization_id, channel)` de `messages`, que
   además controla que `channel` coincida con el tipo de la cuenta (P-045, en lugar de la FK de dos columnas de P-039);
-  `MessagingFixture.channelAccount` crea una cuenta real. Queda para #43: agregar `SANDBOX` a `ChannelType` y
-  garantizar que el adaptador entregue un `externalId` único por cuenta (Telegram: `chatId:messageId`).
+  `MessagingFixture.channelAccount` crea una cuenta real.
+- **#43 (puerto y sandbox)**: hecho (`docs/canales.md`). `SANDBOX` está en `ChannelType`; el puerto
+  `ChannelAdapter` exige un `externalId` único por cuenta y estable entre reenvíos (P-042), y el sandbox lo toma del
+  `id` de cada mensaje del payload. Para Telegram, componerlo (`chatId:messageId`) queda para su adaptador.
 - **#10**: resolver la cuenta con `ChannelAccountDirectory.resolve` y ligar su organización con
   `currentOrganization.runAs(account.organizationId(), ...)` **antes** de llamar a `Timeline`, pasando
   `account.channelType()` como canal. Sin organización, registrar falla por `messages_organization_id_fkey` y

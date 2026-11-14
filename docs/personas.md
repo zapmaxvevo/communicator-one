@@ -39,7 +39,8 @@ organización la asigna y filtra Hibernate con `@TenantId` (P-018).
 
 Los otros módulos solo ven el id de la persona (`UUID`, P-019) y el value object. La entidad persistida se llama
 `PersonIdentity` y no `ContactIdentity` porque ese nombre es del value object público, el mismo que recibe
-`ChannelAdapter.send(ContactIdentity to, …)` en `docs/vision.md` §5.
+`ChannelAdapter.send(ContactIdentity to, …)` (`docs/vision.md` §5; en el código desde #43, `ChannelAdapter.java:16`,
+que además lo devuelve como remitente en `InboundMessage.sender`, `docs/canales.md`).
 
 Dependencia nueva: `com.googlecode.libphonenumber:libphonenumber` 9.0.43, con la versión en la propiedad
 `libphonenumber.version` (`backend/pom.xml:20`, `:68-72`). Para los tests se suma Awaitility (scope test, versión de
