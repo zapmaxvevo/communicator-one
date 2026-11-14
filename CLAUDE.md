@@ -27,7 +27,7 @@ docker-compose.yml   PostgreSQL 18 y Redis para desarrollo local
 web/                 React + TS + Vite (prevista, issue #3)
 docs/                visión, decisiones, multi-tenant, autenticación, personas, oportunidades, equivalencias del backlog
 scripts/             issues.py (issues, subissues y estados del Project con gh)
-.github/             plantillas de issue (tarea, error) y de PR
+.github/             plantillas de issue (tarea, error) y de PR, workflows de CI
 .claude/             agentes, skills, rules y hooks de Claude Code
 ```
 
@@ -104,6 +104,9 @@ implementa `OrganizationMember`). Las reglas están en `.claude/rules/java.md` (
 El wrapper verifica Maven con `distributionSha256Sum` (`.mvn/wrapper/maven-wrapper.properties`): al cambiar
 `distributionUrl`, poner el `sha256sum` del zip nuevo, verificado contra su `.sha512` de Maven Central.
 
+CI: `.github/workflows/backend.yml` corre `./mvnw verify` en push a `main` y en todo PR que toque `backend/`
+(cualquier base, también apilados). No hay checks requeridos (P-012): mirar que el PR esté en verde antes de mergear.
+
 ## Glosario (dominio en español → código en inglés)
 
 | Concepto | Código |
@@ -157,7 +160,8 @@ y `cerrar-padres` después de `gh pr merge`.
 Este repo está pensado para que agentes trabajen sin supervisión (por ejemplo, de noche). Por eso:
 
 1. **Tomar la primera tarea abierta** (primer issue en Todo del Project, en orden de milestone) cuyas dependencias
-   («Depende de») estén cerradas. Una tarea por rama/PR.
+   («Depende de») estén cerradas o cuya única dependencia pendiente esté en un PR abierto sin mergear (PR apilado,
+   P-011). Una tarea por rama/PR.
 2. **Si surge una duda no resuelta en `docs/decisiones.md`:** elegir la opción más simple y convencional, anotarla en la sección *Provisorias* de `docs/decisiones.md` (fecha, contexto, opción elegida, alternativas) y seguir. No frenarse a preguntar.
 3. **Si una tarea es demasiado grande**, dividirla en subissues y hacer solo la primera parte.
 4. **Si algo bloquea de verdad** (falta una credencial, una cuenta externa, una decisión de producto que cambia el alcance): comentar el motivo en el issue con la etiqueta `blocked` y pasar a la siguiente.

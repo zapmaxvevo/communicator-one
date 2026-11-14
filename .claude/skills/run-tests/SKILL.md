@@ -13,7 +13,7 @@ el wrapper de Maven desde `backend/`:
 
 ```bash
 cd backend && ./mvnw test                      # tests unitarios y de integración que corre surefire
-cd backend && ./mvnw verify                    # build completo con la suite entera (todavía no hay CI)
+cd backend && ./mvnw verify                    # build completo con la suite entera (lo mismo que corre el CI)
 ```
 
 Si `$ARGUMENTS` trae una clase, un método o un módulo, acotá la corrida:
@@ -32,7 +32,7 @@ Si Docker no está disponible, no cambies la configuración para esquivarlo: avi
 ```bash
 cd web && npx vitest run <archivos o carpeta>
 cd web && npm test                             # suite completa
-cd web && npm run lint && npm run build        # lo que corre CI además de los tests
+cd web && npm run lint && npm run build        # lint y build además de los tests
 ```
 
 ## Después de correr
