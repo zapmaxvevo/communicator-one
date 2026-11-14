@@ -27,7 +27,7 @@ docker-compose.yml   PostgreSQL 18 y Redis para desarrollo local
 web/                 React + TS + Vite (prevista, issue #3)
 docs/                visión, decisiones, equivalencias del backlog
 scripts/             issues.py (issues, subissues y estados del Project con gh)
-.github/             plantillas de issue (tarea, error) y de PR; workflows/backend.yml (CI del backend)
+.github/             plantillas de issue (tarea, error) y de PR, workflows de CI
 .claude/             agentes, skills, rules y hooks de Claude Code
 ```
 
@@ -73,12 +73,8 @@ Solo las rutas exactas `/actuator/health` y `/error` son públicas; todo lo dem�
 PostgreSQL (no usa el de compose), compartido por toda la corrida con `@ServiceConnection`. Las migraciones Flyway van
 en `src/main/resources/db/migration` (ubicación por defecto; todavía no hay ninguna).
 
-CI (`.github/workflows/backend.yml`): corre `./mvnw -B --no-transfer-progress verify` en `backend/` con Java 25
-(Temurin) en `ubuntu-latest`, que trae Docker para Testcontainers. Se dispara en push a `main` y en todo pull request
-(cualquier base, así corre también en PRs apilados), solo si cambian `backend/**` o el propio workflow. En un PR, un
-push nuevo cancela la corrida anterior; si fallan los tests, sube `backend/target/surefire-reports/` como artifact
-`test-reports` (7 días). El equivalente local es `./mvnw verify` (ver arriba). No hay checks requeridos (P-012):
-antes de mergear, mirar que el PR esté en verde.
+CI: `.github/workflows/backend.yml` corre `./mvnw verify` en push a `main` y en todo PR que toque `backend/`
+(cualquier base, también apilados). No hay checks requeridos (P-012): mirar que el PR esté en verde antes de mergear.
 
 ## Glosario (dominio en español → código en inglés)
 

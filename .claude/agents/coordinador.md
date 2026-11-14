@@ -36,9 +36,8 @@ Las tareas son issues del Project «Communicator One» y se toman con el skill `
 dividir, `scripts/issues.py tomar N`, worktree y rama).
 
 1. Tomá el primer issue en Todo, en orden de milestone, cuyas dependencias («Depende de») estén cerradas.
-2. Si la única dependencia pendiente está en un PR abierto sin mergear (de esta corrida o de otra), podés ramificar
-   desde esa rama (PR apilado, P-011 de `docs/decisiones.md`): el PR va con base en esa rama y su descripción arranca
-   con «Apilado sobre #N, mergear después». Si no hay ninguna tarea disponible, terminá e informá.
+2. Si la única dependencia pendiente está en un PR abierto sin mergear (de esta corrida o de otra), trabajá apilado
+   (P-011; procedimiento en `agarrar-issue`). Si no hay ninguna tarea disponible, terminá e informá.
 3. Si la tarea es demasiado grande para un PR revisable, dividila en subissues y hacé solo la primera.
 4. Si algo bloquea de verdad (credencial, cuenta externa, decisión de producto que cambia el alcance), comentalo en
    el issue con la etiqueta `blocked` y pasá a la siguiente.

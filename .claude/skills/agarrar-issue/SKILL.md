@@ -20,7 +20,7 @@ Se lee con `gh api` porque `gh issue view` falla en versiones viejas de `gh` (co
   `python3 scripts/issues.py dividir N` muestra las tareas; juntá las que van en el mismo cambio con `--grupos` y,
   con el OK de quien lo pidió (en modo autónomo, si cada parte es un PR revisable por sí solo), `--hacer`. Seguí con
   un subissue.
-- Revisá «Depende de»: si alguno sigue abierto, no lo empieces (salvo PR apilado, ver `coordinador`).
+- Revisá «Depende de»: si alguno sigue abierto, no lo empieces (salvo PR apilado: P-011 y §3, §5 y §6).
 - Verificá la premisa contra el árbol antes de construir: el issue puede estar viejo (otro PR lo resolvió, el código
   cambió). Si ya no se sostiene, el entregable es eso, con la evidencia, en un comentario en el issue.
 
@@ -32,6 +32,8 @@ Se lee con `gh api` porque `gh issue view` falla en versiones viejas de `gh` (co
 
 No se trabaja en el árbol de `main`: así varias sesiones o agentes no se pisan. Entrá a un worktree con la herramienta
 `EnterWorktree` y renombrá la rama: `git branch -m feature/N-<tema-corto>` (o `fix/N-<tema-corto>` si es `bug`).
+Si se apila (P-011), el worktree se crea desde la rama del PR de la dependencia, no desde `main`:
+`git fetch origin && git worktree add -b feature/N-<tema-corto> .claude/worktrees/<dir> origin/<rama-dependencia>`.
 En `web/`, corré `npm ci` dentro del worktree antes de testear.
 
 ## 4. Resolverlo
@@ -54,7 +56,8 @@ gh pr create -R zapmaxvevo/communicator-one --title "<qué cambia, en español e
 ```
 
 El cuerpo sigue `.github/pull_request_template.md` (con `--body`, `gh` no la carga sola): `Closes #N`, qué cambia, por
-qué y cómo se probó, con lo que falló de la suite aunque sea conocido. Pasá el link del PR.
+qué y cómo se probó, con lo que falló de la suite aunque sea conocido. Pasá el link del PR. Si es apilado, agregá
+`--base <rama-dependencia>` y la descripción arranca con «Apilado sobre #N, mergear después».
 
 ## 6. Revisión y merge
 
@@ -67,6 +70,9 @@ qué y cómo se probó, con lo que falló de la suite aunque sea conocido. Pasá
 - El dueño mergea, o pide que se mergee. Nunca se pushea a `main`. Al mergear, el issue pasa a Done y el hook de
   `.claude/settings.json` corre `cerrar-padres` (si se mergea desde la web, correrlo a mano:
   `python3 scripts/issues.py cerrar-padres`).
+- PR apilado: después de mergear la dependencia, su base pasa a `main` (sola si se borró la rama al mergear; si no, a
+  mano) antes de mergearlo, porque `Closes #N` solo se aplica contra la rama por defecto. Cambiar la base no vuelve a
+  disparar el CI; un push nuevo sí.
 
 ## 7. El worktree se borra solo
 

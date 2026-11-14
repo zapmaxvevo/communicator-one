@@ -32,7 +32,7 @@ Si Docker no está disponible, no cambies la configuración para esquivarlo: avi
 ```bash
 cd web && npx vitest run <archivos o carpeta>
 cd web && npm test                             # suite completa
-cd web && npm run lint && npm run build        # lint y build además de los tests (el CI de web llega con #3)
+cd web && npm run lint && npm run build        # lint y build además de los tests
 ```
 
 ## Después de correr
