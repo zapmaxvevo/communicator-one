@@ -3,16 +3,17 @@ name: run-tests
 description: Corre los tests del backend (Maven + JUnit 5 + Testcontainers) o de la web (Vitest) con los comandos correctos. Usar cuando se pida correr tests, verificar un cambio o chequear un módulo o test puntual. Opcionalmente recibe una clase, un paquete o un archivo (ej. "PersonTest", "people", "web/src/features/inbox").
 ---
 
-Correr los tests del proyecto. Los comandos definitivos los fija el scaffold (issue #1 backend, issue #3 web) y quedan en
-`CLAUDE.md`; si difieren de lo que dice acá, manda `CLAUDE.md`.
+Correr los tests del proyecto. Los comandos definitivos están en `CLAUDE.md` (sección «Comandos»; los de la web llegan
+con el issue #3); si difieren de lo que dice acá, manda `CLAUDE.md`.
 
 ## Backend (`backend/`)
 
-Necesita Docker corriendo (Testcontainers levanta PostgreSQL). Siempre con el wrapper de Maven desde `backend/`:
+Necesita Docker corriendo (Testcontainers levanta su propio PostgreSQL; no hace falta el `docker compose`). Siempre con
+el wrapper de Maven desde `backend/`:
 
 ```bash
 cd backend && ./mvnw test                      # tests unitarios y de integración que corre surefire
-cd backend && ./mvnw verify                    # build completo, como en CI
+cd backend && ./mvnw verify                    # build completo con la suite entera (todavía no hay CI)
 ```
 
 Si `$ARGUMENTS` trae una clase, un método o un módulo, acotá la corrida:
@@ -20,7 +21,8 @@ Si `$ARGUMENTS` trae una clase, un método o un módulo, acotá la corrida:
 ```bash
 cd backend && ./mvnw test -Dtest=PersonTest
 cd backend && ./mvnw test -Dtest='PersonTest#unknownIdentityCreatesNewPerson'
-cd backend && ./mvnw test -Dtest='<base/package>/people/**/*' -Dsurefire.failIfNoSpecifiedTests=false
+cd backend && ./mvnw test -Dtest=ModularStructureTest    # estructura de módulos, no necesita Docker
+cd backend && ./mvnw test -Dtest='com/communicatorone/people/**/*' -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
 Si Docker no está disponible, no cambies la configuración para esquivarlo: avisá (ver regla 8 de `CLAUDE.md`).
