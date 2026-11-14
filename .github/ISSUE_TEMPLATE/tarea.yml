@@ -1,0 +1,24 @@
+name: Tarea
+description: Algo para construir o cambiar (lo que antes era una entrada de docs/backlog.md)
+labels: ["enhancement"]
+body:
+  - type: textarea
+    attributes:
+      label: Qué hay que hacer
+      description: El alcance concreto. Si son varias entregas, una casilla `- [ ]` por cada una (después se dividen en subissues).
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Terminado cuando
+      description: El criterio de aceptación verificable (comandos que pasan, escenarios que se cumplen).
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Decisiones que aplican
+      description: Las D-XXX de docs/decisiones.md y la sección de docs/vision.md que gobiernan la tarea.
+  - type: input
+    attributes:
+      label: Depende de
+      description: "Issues que tienen que estar cerrados antes (ej. #3, #5). Vacío si ninguno."

@@ -53,9 +53,23 @@ Java (última LTS) + Spring Boot. Monolito modular (Spring Modulith), hexagonal.
 
 **D-011 · Web en React + TypeScript + Vite** (2026-11-13)
 
+## Forma de trabajo
+
+**D-012 · Tareas en GitHub Issues + Projects** (2026-11-13)
+Las tareas y errores son issues del repo, en un Project de GitHub con tablero (Todo / In Progress / Done). Las tareas
+con varias entregas se dividen en subissues; cada PR cierra su issue con `Closes #N`. El backlog se migró el
+2026-11-13 (#1 a #22, un milestone por fase); `docs/backlog.md` quedó como tabla de equivalencias. El ciclo de un
+issue está en el skill `agarrar-issue`.
+
+**D-013 · Agentes con revisor dedicado** (2026-11-13)
+Se trabaja con el esquema de agentes traído de Delivery Run: un `coordinador` (hilo principal) que reparte entre
+workers, cada uno con su revisor dedicado, con TDD y máximo 2 rondas worker↔revisor. Sin comentarios en el código.
+
 ## Provisorias
 
 Decisiones tomadas por un agente (o propuestas) que el dueño todavía no revisó. Formato: fecha, tarea, contexto, opción elegida, alternativas.
 
 - **P-001 · 2026-11-13 · setup** · Build con **Maven** (más común en Java empresarial). Alternativa: Gradle con Kotlin DSL.
 - **P-002 · 2026-11-13 · setup** · Código e identificadores en **inglés** (portfolio y venta), documentación y commits en español. Alternativa: dominio en español.
+- **P-003 · 2026-11-13 · setup de agentes** · Nombres de tests en inglés, camelCase, contando el escenario (`duplicatedWebhookDoesNotDuplicateMessage`), con marcadores `// Given / When / Then`, que son los únicos comentarios permitidos. Alternativas: `@DisplayName` en español; nombres en snake_case.
+- **P-004 · 2026-11-13 · setup de agentes** · Migraciones Flyway con numeración correlativa (`V<n>__...`); si choca con `main`, se renumera la de la rama. Alternativa: versión por timestamp (evita choques entre ramas paralelas, pero exige `outOfOrder`).
