@@ -17,7 +17,7 @@ identidad y devuelve el id nuevo (D-003). Antes de buscar, la identidad ya está
 minúsculas), así que «+54 9 11 5555-0101» y «+5491155550101» son la misma persona.
 
 Se va a activar con cada mensaje entrante: el flujo entrante (#10) resuelve la persona del remitente antes de guardar
-el mensaje. Hoy nadie la llama todavía fuera de los tests.
+el mensaje (y antes de registrar la actividad en su oportunidad). Hoy nadie la llama todavía fuera de los tests.
 
 Fuera de #6 (P-030): nombre de la persona, endpoints REST, agregar una segunda identidad a una persona existente y
 fusión de duplicados.
@@ -80,18 +80,22 @@ Quien llama a `resolveOrCreate`:
 3. **Construye la `ContactIdentity` antes**, y atrapa `InvalidContactIdentityException` si el dato que trae el proveedor
    no es válido.
 
-Orden para el flujo entrante (#10): la persona se confirma en su propia transacción **antes** de la oportunidad y el
-mensaje, que van en otra.
+Orden para el flujo entrante (#10): tres transacciones, una por paso. La persona se confirma en la suya **antes** de
+la oportunidad (`OpportunityTracker.recordActivity`, con su propia transacción; ver `docs/oportunidades.md`) y del
+mensaje (#8). El mensaje duplicado se descarta por `externalId` antes de `recordActivity`, para que un reenvío del
+proveedor no cuente como actividad.
 
 ```java
 currentOrganization.callAs(organizationId, () -> {
-    var personId = personDirectory.resolveOrCreate(identity);
-    return inbound.record(personId, message);
+    var personId = personDirectory.resolveOrCreate(identity);               // tx 1
+    // #10 descarta acá el duplicado por externalId
+    var opportunityId = opportunityTracker.recordActivity(personId, source); // tx 2
+    return messages.record(personId, opportunityId, message);                // tx 3 (#8)
 });
 ```
 
-No se envuelve todo el flujo en un `@Transactional`: `resolveOrCreate` lo rechazaría. Si lo que sigue falla, la
-persona ya creada queda (sin mensajes), y el reintento del webhook la encuentra en vez de crear otra.
+No se envuelve todo el flujo en un `@Transactional`: `resolveOrCreate` y `recordActivity` lo rechazarían. Si lo que
+sigue falla, la persona ya creada queda (sin mensajes), y el reintento del webhook la encuentra en vez de crear otra.
 
 ## Diagramas
 
