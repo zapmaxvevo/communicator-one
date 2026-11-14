@@ -85,12 +85,13 @@ Quien llama a `recordActivity`:
 5. **Descarta antes los duplicados**: #10 descarta el mensaje repetido con `Timeline.isRecorded(channelAccountId,
    externalId)` antes de llamar, porque cada llamada cuenta como actividad nueva.
 
-Flujo entrante (#10), en tres transacciones (persona, oportunidad, mensaje):
+Flujo entrante (#10), en tres transacciones de escritura (persona, oportunidad, mensaje), más la de solo lectura de
+`isRecorded`:
 
 ```java
 currentOrganization.callAs(organizationId, () -> {
     var personId = personDirectory.resolveOrCreate(identity);                     // tx 1
-    if (timeline.isRecorded(channelAccountId, externalId)) {                      // sin transacción
+    if (timeline.isRecorded(channelAccountId, externalId)) {                      // solo lectura
         return null;                                                              // reenvío: no cuenta como actividad
     }
     var opportunityId = opportunityTracker.recordActivity(personId, source);      // tx 2

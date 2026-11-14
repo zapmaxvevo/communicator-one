@@ -44,7 +44,7 @@ módulo por encima, nunca en `messaging`, porque eso armaría un ciclo (P-038).
 
 | Clase | Visibilidad | Qué hace |
 |---|---|---|
-| `Timeline` | pública (API) | `@Service` con `recordReceived` (`Timeline.java:26-29`), `recordSent` (`Timeline.java:31-34`), `applyStatus`, `@Transactional` (`Timeline.java:36-45`), e `isRecorded` (`Timeline.java:47-50`). El registro lo hace el privado `record` (`Timeline.java:62-75`); `applyStatus` e `isRecorded` validan la cuenta y el `externalId` con el privado `requireProviderKey` (`Timeline.java:52-55`). Recibe `MessageRepository`, el bean `TransactionTemplate` de Spring Boot y `Clock` en el constructor package-private (`Timeline.java:20-24`). |
+| `Timeline` | pública (API) | `@Service` con `recordReceived` (`Timeline.java:26-29`), `recordSent` (`Timeline.java:31-34`), `applyStatus`, `@Transactional` (`Timeline.java:36-45`), e `isRecorded`, `@Transactional(readOnly = true)` (`Timeline.java:47-51`). El registro lo hace el privado `record` (`Timeline.java:63-76`); `applyStatus` e `isRecorded` validan la cuenta y el `externalId` con el privado `requireProviderKey` (`Timeline.java:53-56`). Recibe `MessageRepository`, el bean `TransactionTemplate` de Spring Boot y `Clock` en el constructor package-private (`Timeline.java:20-24`). |
 | `ReceivedMessage` | pública (API) | `record (personId, opportunityId, channelAccountId, ChannelType channel, String externalId, MessageContent content, Instant occurredAt)` (`ReceivedMessage.java:6-7`). Sin validación propia: la hace `Message`. |
 | `SentMessage` | pública (API) | `record (personId, opportunityId, channelAccountId, ChannelType channel, SenderType senderType, String externalId, MessageContent content)` (`SentMessage.java:5-6`). Sin hora: la pone el reloj. |
 | `MessageContent` | pública (API) | `record (String text)`; el constructor compacto exige texto con `Assert.hasLength` («A message needs its text», `MessageContent.java:7-9`): rechaza nulo y vacío, acepta espacios y no recorta. `toString` devuelve `MessageContent[text]`, sin el texto (`MessageContent.java:11-14`). Hoy es solo texto. |
@@ -54,7 +54,7 @@ módulo por encima, nunca en `messaging`, porque eso armaría un ciclo (P-038).
 | `MessageStatus` | pública (API) | `SENT(0)`, `FAILED(1)`, `DELIVERED(2)`, `READ(3)`, `DELETED(4)`, con el rango en un campo `progress` (`MessageStatus.java:3-14`). El enum es público, pero `isAheadOf(other)` (`true` si el rango es mayor, `MessageStatus.java:16-18`) es package-private: la regla de avance solo la usa `Message.advanceTo`. |
 | `StatusUpdateOutcome` | pública (API) | `ADVANCED`, `UNCHANGED`, `UNKNOWN_MESSAGE` (`StatusUpdateOutcome.java:3-7`). |
 | `Message` | package-private | Entidad de la tabla `messages`: `id`, `@TenantId organizationId`, `personId`, `opportunityId`, `channelAccountId`, `channel`, `senderType` y `status` (guardados por nombre), `externalId`, `text`, `occurredAt`, `recordedAt` (`Message.java:17-50`). Fábricas `received(ReceivedMessage, now)` (`Message.java:71-76`) y `sent(SentMessage, now)` (`Message.java:78-85`), que pasan por el constructor privado que valida (`Message.java:55-69`); regla `advanceTo(MessageStatus)` (`Message.java:87-94`). Sin setters. |
-| `MessageRepository` | package-private | `findIdByChannelAccountIdAndExternalId`, JPQL que devuelve solo el id (`MessageRepository.java:13-15`), y `findByChannelAccountIdAndExternalId` con `@Lock(PESSIMISTIC_WRITE)` (`MessageRepository.java:17-18`). Las dos pasan por `@TenantId`. |
+| `MessageRepository` | package-private | `findIdByChannelAccountIdAndExternalId`, JPQL que devuelve solo el id (`MessageRepository.java:13-15`), y `lockByChannelAccountIdAndExternalId`, JPQL explícita con `@Lock(PESSIMISTIC_WRITE)` (`MessageRepository.java:17-20`); el nombre avisa que bloquea la fila. Las dos pasan por `@TenantId`. |
 
 El `package-info.java` con `@ApplicationModule` ya existía desde el scaffold y `ModularStructureTest` ya declaraba
 `messaging`. #8 suma la migración V6 (ver «Esquema»), que además agrega una restricción a `opportunities`.
@@ -111,7 +111,7 @@ trabajo del adaptador (#9, #11): `messaging` no conoce payloads.
 Quien llama a `recordReceived` o `recordSent`:
 
 1. **No tiene una transacción abierta.** La operación abre la suya; con sincronización de transacción activa (una
-   transacción real o un ámbito `SUPPORTS`) lanza `IllegalStateException` (`Timeline.java:57-60`). Es la misma
+   transacción real o un ámbito `SUPPORTS`) lanza `IllegalStateException` (`Timeline.java:58-61`). Es la misma
    comprobación que `PersonDirectory.resolveOrCreate` (P-029) y `OpportunityTracker.recordActivity` (P-035): en
    PostgreSQL una violación aborta la transacción en curso, y la relectura del duplicado necesita una transacción
    limpia.
@@ -128,15 +128,18 @@ Quien llama a `recordReceived` o `recordSent`:
 5. **Pasa el canal de la cuenta.** `channel` repite el tipo de la `ChannelAccount` y hoy nada controla que coincidan
    (P-039); lo valida #9.
 
-`applyStatus` es `@Transactional` con la propagación por defecto: si el llamador tiene una transacción, se une a ella y
-el lock de la fila dura hasta que esa transacción termine. `isRecorded` no abre transacción.
+`applyStatus` es `@Transactional` con la propagación por defecto: si el llamador tiene una transacción, se une a ella
+y el lock de la fila dura hasta que esa transacción termine. `isRecorded` es `@Transactional(readOnly = true)`: su
+transacción de solo lectura termina antes de volver, así que no le deja una abierta al `recordReceived` que sigue; si
+el llamador ya tiene una transacción, se une a ella.
 
-Flujo entrante (#10), en tres transacciones (persona, oportunidad, mensaje):
+Flujo entrante (#10), en tres transacciones de escritura (persona, oportunidad, mensaje), más la de solo lectura de
+`isRecorded`:
 
 ```java
 currentOrganization.callAs(organizationId, () -> {
     var personId = personDirectory.resolveOrCreate(identity);                     // tx 1
-    if (timeline.isRecorded(channelAccountId, externalId)) {                      // sin transacción
+    if (timeline.isRecorded(channelAccountId, externalId)) {                      // solo lectura
         return null;                                                              // reenvío: no cuenta como actividad
     }
     var opportunityId = opportunityTracker.recordActivity(personId, source);      // tx 2
@@ -209,7 +212,7 @@ stateDiagram-v2
 
 ## Diagramas
 
-`recordReceived` / `recordSent` (`Timeline.java:26-34`, `:62-75`):
+`recordReceived` / `recordSent` (`Timeline.java:26-34`, `:63-76`):
 
 ```mermaid
 flowchart TD
@@ -235,7 +238,7 @@ flowchart TD
     A[applyStatus channelAccountId, externalId, status] --> V{nulos o externalId<br/>sin texto?}
     V -->|sí| X[NullPointerException /<br/>IllegalArgumentException]
     V -->|no| T[transacción @Transactional]
-    T --> F[findByChannelAccountIdAndExternalId<br/>FOR NO KEY UPDATE, organización activa]
+    T --> F[lockByChannelAccountIdAndExternalId<br/>FOR NO KEY UPDATE, organización activa]
     F -->|no está| U[UNKNOWN_MESSAGE]
     F -->|está| AD{advanceTo status:<br/>rango mayor que el actual?}
     AD -->|sí| ADV[status = reportado<br/>ADVANCED, UPDATE al confirmar]
@@ -288,23 +291,23 @@ sequenceDiagram
 `recordReceived` y `recordSent` (`Timeline.java:26-34`):
 
 1. Rechazan la sincronización de transacción activa (`Timeline.java:27`, `:32`, con el privado
-   `requireNoOpenTransaction`, `Timeline.java:57-60`). Esa comprobación va primero: un comando nulo dentro de una
+   `requireNoOpenTransaction`, `Timeline.java:58-61`). Esa comprobación va primero: un comando nulo dentro de una
    transacción da `IllegalStateException`, no `NullPointerException`.
 2. Leen el reloj una vez y arman el `Message` con `Message.received` o `Message.sent` (`Timeline.java:28`, `:33`).
    Las fábricas rechazan el comando nulo (`Message.java:72`, `:79`); el constructor privado valida `externalId` con
    `Assert.hasText` y el resto con `Objects.requireNonNull` (`Message.java:58-68`); `sent` rechaza antes el remitente
    `CUSTOMER` (`Message.java:80-82`).
 
-`record` (`Timeline.java:62-75`):
+`record` (`Timeline.java:63-76`):
 
-1. Busca el id por cuenta + `externalId` **sin transacción** (`Timeline.java:63-67`): el JPQL
+1. Busca el id por cuenta + `externalId` **sin transacción** (`Timeline.java:64-68`): el JPQL
    (`MessageRepository.java:13-15`) pasa por `@TenantId`, así que solo ve mensajes de la organización activa. Si
    encuentra, devuelve `RecordedMessage(id, true)` sin abrir transacción de escritura y sin WARN: es el camino de cada
    reenvío del proveedor.
-2. Si no encuentra, hace `saveAndFlush` dentro del `TransactionTemplate` (`Timeline.java:68-69`). Hibernate asigna
+2. Si no encuentra, hace `saveAndFlush` dentro del `TransactionTemplate` (`Timeline.java:69-70`). Hibernate asigna
    `organization_id` y el `flush` hace que una violación salga ahí mismo como `DataIntegrityViolationException`.
 3. Si el `INSERT` choca, la transacción ya se deshizo entera y relee con la misma consulta sin transacción
-   (`Timeline.java:70-74`). Con READ COMMITTED ve el mensaje que confirmó la otra transacción y devuelve
+   (`Timeline.java:71-75`). Con READ COMMITTED ve el mensaje que confirmó la otra transacción y devuelve
    `RecordedMessage(id del ganador, true)`. Si no hay nada, la violación no era una carrera (FK de persona u
    oportunidad, sin organización) y relanza la excepción original.
 
@@ -312,10 +315,10 @@ sequenceDiagram
 
 `applyStatus` (`Timeline.java:36-45`), en una transacción:
 
-1. Valida la cuenta y el `externalId` con `requireProviderKey` (`Timeline.java:38`, `:52-55`), la misma validación
-   que `isRecorded` (`Timeline.java:48`), y el estado con `Objects.requireNonNull` (`Timeline.java:39`).
-2. Trae el mensaje con `findByChannelAccountIdAndExternalId` con `@Lock(PESSIMISTIC_WRITE)`
-   (`MessageRepository.java:17-18`), que en PostgreSQL Hibernate traduce a `FOR NO KEY UPDATE` (es lo que espera
+1. Valida la cuenta y el `externalId` con `requireProviderKey` (`Timeline.java:38`, `:53-56`), la misma validación
+   que `isRecorded` (`Timeline.java:49`), y el estado con `Objects.requireNonNull` (`Timeline.java:39`).
+2. Trae el mensaje con `lockByChannelAccountIdAndExternalId` con `@Lock(PESSIMISTIC_WRITE)`
+   (`MessageRepository.java:17-20`), que en PostgreSQL Hibernate traduce a `FOR NO KEY UPDATE` (es lo que espera
    `MessagingFixture.anotherSessionIsWaitingToLockTheMessage`, `MessagingFixture.java:111-113`). `@TenantId` agrega el
    filtro por organización.
 3. Si no está, `UNKNOWN_MESSAGE`. Si está, `advanceTo` decide (`Message.java:87-94`) y devuelve `ADVANCED` o
@@ -530,7 +533,7 @@ Comando: `./mvnw test -Dtest='MessageTest,TimelineTest'` desde `backend/` (skill
 - Los tests de las carreras dependen de `pg_stat_activity` (PostgreSQL).
 - **Dos `SELECT` iguales para un mensaje nuevo en el flujo de #10**: el flujo previsto («API y contrato») llama a
   `isRecorded` y después a `recordReceived`, que vuelve a buscar por cuenta + `externalId` antes de insertar
-  (`Timeline.java:49`, `:63-64`). Para un mensaje nuevo, el caso común, son dos consultas idénticas por el `UNIQUE`.
+  (`Timeline.java:50`, `:64-65`). Para un mensaje nuevo, el caso común, son dos consultas idénticas por el `UNIQUE`.
   #10 puede decidir por `RecordedMessage.duplicate` (registrar primero y contar la actividad solo si es `false`, lo que
   obliga a resolver la oportunidad de otra forma, porque `ReceivedMessage` la necesita) o aceptar la consulta extra,
   que es barata (búsqueda por índice único).
