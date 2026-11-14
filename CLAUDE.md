@@ -62,7 +62,7 @@ docker compose down -v      # además borra el volumen de Postgres (reset del en
 Backend, desde `backend/`:
 
 ```bash
-./mvnw verify                              # suite completa (Testcontainers levanta su propio Postgres; necesita Docker, no compose)
+./mvnw verify                              # suite completa
 ./mvnw test -Dtest=ModularStructureTest    # estructura de módulos, sin Docker
 ./mvnw spring-boot:run                     # necesita el Postgres de compose; puerto 8080 (otro: SERVER_PORT=8081)
 curl -s localhost:8080/actuator/health     # {"groups":["liveness","readiness"],"status":"UP"}
@@ -70,9 +70,9 @@ curl -s localhost:8080/actuator/health     # {"groups":["liveness","readiness"],
 
 Solo las rutas exactas `/actuator/health` y `/error` son públicas; todo lo demás (incluidos
 `/actuator/health/liveness`, `/actuator/health/readiness`, Swagger y `/v3/api-docs`) responde 401 hasta el issue #5
-(JWT). Los tests de integración importan `TestcontainersConfiguration` (`@Import`), que da un PostgreSQL compartido por
-toda la corrida con `@ServiceConnection`. Las migraciones Flyway van en `src/main/resources/db/migration` (ubicación
-por defecto; todavía no hay ninguna).
+(JWT). Los tests de integración importan `TestcontainersConfiguration` (`@Import`), que levanta con Docker su propio
+PostgreSQL (no usa el de compose), compartido por toda la corrida con `@ServiceConnection`. Las migraciones Flyway van
+en `src/main/resources/db/migration` (ubicación por defecto; todavía no hay ninguna).
 
 ## Glosario (dominio en español → código en inglés)
 

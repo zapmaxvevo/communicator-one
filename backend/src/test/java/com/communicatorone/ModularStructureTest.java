@@ -8,13 +8,12 @@ import org.springframework.modulith.core.ApplicationModules;
 
 class ModularStructureTest {
 
+    private static final ApplicationModules MODULES = ApplicationModules.of(CommunicatorOneApplication.class);
+
     @Test
     void applicationIsOrganizedInTheSevenDomainModules() {
-        // Given
-        var modules = ApplicationModules.of(CommunicatorOneApplication.class);
-
         // When
-        var declaredModules = modules.stream()
+        var declaredModules = MODULES.stream()
                 .map(module -> module.getIdentifier().toString())
                 .toList();
 
@@ -25,10 +24,7 @@ class ModularStructureTest {
 
     @Test
     void domainModulesOnlyDependOnEachOthersPublicApi() {
-        // Given
-        var modules = ApplicationModules.of(CommunicatorOneApplication.class);
-
         // When / Then
-        assertThatCode(modules::verify).doesNotThrowAnyException();
+        assertThatCode(MODULES::verify).doesNotThrowAnyException();
     }
 }
