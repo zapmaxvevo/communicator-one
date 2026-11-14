@@ -1,0 +1,61 @@
+# Decisiones
+
+Decisiones tomadas por el dueño del producto. **No re-discutir.** Si algo de acá parece incorrecto, anotarlo en *Provisorias* como propuesta, sin cambiar la decisión.
+
+## Producto
+
+**D-001 · Persona permanente, oportunidades con ciclo de vida** (2026-11-13)
+Modelo similar a Salesforce. La persona es permanente y tiene una sola línea de tiempo con todos los mensajes. La oportunidad (episodio) se abre cuando la persona entra con una intención, tiene responsable, estado, fuente y resultado, y se cierra por resultado o por inactividad. Cada mensaje queda asociado a la persona y a la oportunidad abierta en ese momento. Métricas por oportunidad.
+
+**D-002 · Duración de oportunidades configurable** (2026-11-13)
+Por organización (o campaña), con dos valores:
+- `inactivityDaysToClose`: N días sin mensajes → la oportunidad se cierra sola.
+- `reentryWindow`: si la persona vuelve dentro de la ventana, se reabre la misma oportunidad; si vuelve después, se abre una nueva.
+Valores de referencia: venta transaccional (plan de ahorro, seguros) reingreso ~3 días, cierre 7–15 días; consultiva (autos, inmuebles) 30–90 días; servicio recurrente: cada pedido es una oportunidad.
+
+**D-003 · Resolución de identidades** (2026-11-13)
+Se busca por cualquier dato de contacto conocido (teléfono normalizado E.164, email en minúsculas, id del canal). Si coincide → misma persona. Si no coincide → persona nueva. La revisión de duplicados (sugerida por el sistema, confirmada por una persona) queda para más adelante.
+
+**D-004 · Vista** (2026-11-13)
+Vista web propia primero. Después celular (PWA, luego app de tienda), escritorio (la misma web envuelta para mantener el estilo: Electron o Tauri, se decide después) y terminal (TUI).
+
+**D-005 · Restricciones por canal** (2026-11-13)
+Patrón de estados de ventana: `OPEN`, `AWAITING_REPLY`, `REQUIRES_TEMPLATE`, `BLOCKED`. Cada adaptador devuelve el estado para esa persona y la UI muestra qué puede hacer el operador (texto libre, solo plantilla o nada).
+
+## Reparto
+
+**D-006 · Sin cola global; reparto por organización** (2026-11-13)
+No existe una cola global. Cada organización configura su reparto (estrategia intercambiable) y, si quiere, sus propias colas por equipo o campaña. Por defecto se asigna automáticamente a una persona.
+
+**D-007 · Orden de asignación** (2026-11-13)
+1. Si la persona ya tuvo responsable y sigue activo → vuelve a ese responsable.
+2. Reglas por campaña, fuente, canal o producto → definen el grupo de operadores.
+3. Dentro del grupo → **round robin** entre los disponibles, con **tope de 30 oportunidades abiertas** por operador (si llegó al tope, se lo saltea). Reparto por carga, más adelante.
+4. Si no hay nadie disponible → se asigna igual (al de menor carga o a un responsable de guardia) y se avisa al supervisor.
+Los operadores tienen disponibilidad: `ONLINE`, `AWAY`, `ON_LEAVE`.
+
+**D-008 · Temporizador de atención** (2026-11-13)
+Mismo mecanismo para el tiempo límite de las colas y para la primera respuesta.
+- Cuenta solo la respuesta de una persona; el bot no frena el reloj.
+- Corre solo en el horario de atención de la organización.
+- Por defecto: **chat 15 min, email 4 h**.
+- Aplica solo a la primera respuesta de cada oportunidad.
+- Al vencer: reasigna y avisa al operador y al supervisor. **Después de 2 reasignaciones, escala al supervisor.**
+- Las colas tienen tiempo límite: si nadie toma la oportunidad, se asigna sola.
+
+## Técnica
+
+**D-009 · Arquitectura API primero** (2026-11-13)
+Toda la lógica en el backend. Clientes (web, celular, escritorio, terminal, MCP) consumen la misma API: REST documentada con OpenAPI + WebSocket para tiempo real.
+
+**D-010 · Backend en Java** (2026-11-13)
+Java (última LTS) + Spring Boot. Monolito modular (Spring Modulith), hexagonal. PostgreSQL + Flyway, Spring Security con JWT, multi-tenant por organización. Temporizadores en un scheduler persistido en base. Tests con JUnit 5 + Testcontainers.
+
+**D-011 · Web en React + TypeScript + Vite** (2026-11-13)
+
+## Provisorias
+
+Decisiones tomadas por un agente (o propuestas) que el dueño todavía no revisó. Formato: fecha, tarea, contexto, opción elegida, alternativas.
+
+- **P-001 · 2026-11-13 · setup** · Build con **Maven** (más común en Java empresarial). Alternativa: Gradle con Kotlin DSL.
+- **P-002 · 2026-11-13 · setup** · Código e identificadores en **inglés** (portfolio y venta), documentación y commits en español. Alternativa: dominio en español.
