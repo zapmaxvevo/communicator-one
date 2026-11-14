@@ -88,7 +88,7 @@ Quien llama a `recordActivity`:
 5. **Descarta antes los duplicados**: `InboundPipeline` descarta el mensaje repetido con
    `Timeline.isRecorded(channelAccountId, externalId)` antes de llamar, porque cada llamada cuenta como actividad nueva.
 
-Flujo entrante, como quedó en `InboundPipeline.accept` (#10, `InboundPipeline.java:70-82`; detalle en
+Flujo entrante, como quedó en `InboundPipeline.accept` (#10, `InboundPipeline.java:69-81`; detalle en
 `docs/canales.md`): dentro del `runAs` de la organización de la cuenta, primero la transacción de solo lectura de
 `isRecorded` y después tres de escritura (persona, oportunidad, mensaje):
 

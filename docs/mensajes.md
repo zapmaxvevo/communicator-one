@@ -143,7 +143,7 @@ y el lock de la fila dura hasta que esa transacción termine. `isRecorded` es `@
 transacción de solo lectura termina antes de volver, así que no le deja una abierta al `recordReceived` que sigue; si
 el llamador ya tiene una transacción, se une a ella.
 
-Flujo entrante, como quedó en `InboundPipeline.accept` (#10, `InboundPipeline.java:70-82`; detalle en
+Flujo entrante, como quedó en `InboundPipeline.accept` (#10, `InboundPipeline.java:69-81`; detalle en
 `docs/canales.md`): dentro del `runAs` de la organización de la cuenta, primero la transacción de solo lectura de
 `isRecorded` y después tres de escritura (persona, oportunidad, mensaje):
 

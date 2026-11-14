@@ -6,7 +6,8 @@ import com.communicatorone.messaging.Timeline;
 import com.communicatorone.opportunities.OpportunityTracker;
 import com.communicatorone.organizations.CurrentOrganization;
 import com.communicatorone.people.PersonDirectory;
-import java.util.Optional;
+import java.util.function.Consumer;
+import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -17,6 +18,7 @@ class InboundPipeline {
 
     private static final Logger log = LoggerFactory.getLogger(InboundPipeline.class);
     private static final int MAX_LOGGED_ID_LENGTH = 64;
+    private static final Pattern CONTROL_CHARACTERS = Pattern.compile("\\p{Cntrl}");
 
     private final ChannelAdapterRegistry adapters;
     private final ChannelAccountDirectory accounts;
@@ -43,28 +45,25 @@ class InboundPipeline {
         var inboundMessages = adapter.parseInbound(payload);
         var statusUpdates = adapter.parseStatusUpdates(payload);
         for (var inbound : inboundMessages) {
-            accountReceiving(channelType, inbound.externalAccountId()).ifPresent(account ->
-                    currentOrganization.runAs(account.organizationId(), () -> accept(account, inbound)));
+            inOrganizationOf(channelType, inbound.externalAccountId(), account -> accept(account, inbound));
         }
         for (var update : statusUpdates) {
-            accountReceiving(channelType, update.externalAccountId()).ifPresent(account ->
-                    currentOrganization.runAs(account.organizationId(),
-                            () -> timeline.applyStatus(account.id(), update.externalId(), update.status())));
+            inOrganizationOf(channelType, update.externalAccountId(),
+                    account -> timeline.applyStatus(account.id(), update.externalId(), update.status()));
         }
     }
 
-    private Optional<ChannelAccount> accountReceiving(ChannelType channelType, String externalAccountId) {
-        var account = accounts.resolve(channelType, externalAccountId);
-        if (account.isEmpty()) {
-            log.warn("Inbound {} notification for unknown channel account {} was discarded", channelType,
-                    loggable(externalAccountId));
-        }
-        return account;
+    private void inOrganizationOf(ChannelType channelType, String externalAccountId,
+            Consumer<ChannelAccount> action) {
+        accounts.resolve(channelType, externalAccountId).ifPresentOrElse(
+                account -> currentOrganization.runAs(account.organizationId(), () -> action.accept(account)),
+                () -> log.warn("Inbound {} notification for unknown channel account {} was discarded", channelType,
+                        loggable(externalAccountId)));
     }
 
     private static String loggable(String externalAccountId) {
-        var printable = externalAccountId.replaceAll("\\p{Cntrl}", "_");
-        return printable.substring(0, Math.min(printable.length(), MAX_LOGGED_ID_LENGTH));
+        var truncated = externalAccountId.substring(0, Math.min(externalAccountId.length(), MAX_LOGGED_ID_LENGTH));
+        return CONTROL_CHARACTERS.matcher(truncated).replaceAll("_");
     }
 
     private void accept(ChannelAccount account, InboundMessage inbound) {

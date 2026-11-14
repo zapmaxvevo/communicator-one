@@ -83,7 +83,7 @@ Pipeline de entrada (#10):
 
 | Clase | Visibilidad | Qué hace |
 |---|---|---|
-| `InboundPipeline` | package-private | `@Service` sin `@Transactional` (`InboundPipeline.java:15-16`) con un único método, `receive(ChannelType, WebhookPayload)` (`InboundPipeline.java:41-54`). Recibe en el constructor package-private `ChannelAdapterRegistry`, `ChannelAccountDirectory`, `CurrentOrganization`, `PersonDirectory`, `OpportunityTracker`, `Timeline` y el `ApplicationEventPublisher` de Spring (`InboundPipeline.java:29-39`). Privados: `accountReceiving` (resolver la cuenta o descartar con WARN), `loggable` (sanear el id para el log) y `accept` (un mensaje). Contrato en «Pipeline de entrada (#10)». |
+| `InboundPipeline` | package-private | `@Service` sin `@Transactional` (`InboundPipeline.java:16-17`) con un único método, `receive(ChannelType, WebhookPayload)` (`InboundPipeline.java:43-54`). Recibe en el constructor package-private `ChannelAdapterRegistry`, `ChannelAccountDirectory`, `CurrentOrganization`, `PersonDirectory`, `OpportunityTracker`, `Timeline` y el `ApplicationEventPublisher` de Spring (`InboundPipeline.java:31-41`). Privados: `inOrganizationOf` (resolver la cuenta y correr la acción en el `runAs` de su organización, o descartar con WARN), `loggable` (sanear el id para el log) y `accept` (un mensaje). Contrato en «Pipeline de entrada (#10)». |
 | `MessageReceived` | **pública** (API) | `record (UUID organizationId, UUID messageId, UUID personId, UUID opportunityId, UUID channelAccountId, ChannelType channel)` (`MessageReceived.java:6-8`): el evento de un mensaje entrante nuevo. Sin texto ni identidad del remitente (datos personales). Semántica en «Evento `MessageReceived`». |
 
 El `package-info.java` con `@ApplicationModule` ya existía desde el scaffold y `ModularStructureTest` ya declaraba
@@ -126,11 +126,14 @@ Quien llama a `resolve`:
 2. **Trata el `Optional.empty()` como «webhook para una cuenta que no conocemos»**: no hay organización a la que
    asignarlo. `InboundPipeline` lo descarta con un WARN y sigue (ver «Cuenta desconocida»).
 3. **Después abre el ámbito de la organización de la cuenta** y pasa el tipo de la cuenta como canal del mensaje. Así
-   lo hace `InboundPipeline` (`InboundPipeline.java:45-48`, `:76-77`):
+   lo hace `InboundPipeline` (`InboundPipeline.java:48`, `:56-62`, `:75-76`):
 
 ```java
-accountReceiving(channelType, inbound.externalAccountId()).ifPresent(account ->
-        currentOrganization.runAs(account.organizationId(), () -> accept(account, inbound)));
+inOrganizationOf(channelType, inbound.externalAccountId(), account -> accept(account, inbound));
+// inOrganizationOf:
+accounts.resolve(channelType, externalAccountId).ifPresentOrElse(
+        account -> currentOrganization.runAs(account.organizationId(), () -> action.accept(account)),
+        () -> log.warn(...));
 // dentro de accept:
 timeline.recordReceived(new ReceivedMessage(personId, opportunityId, account.id(),
         account.channelType(), inbound.externalId(), inbound.content(), inbound.occurredAt()));
@@ -455,7 +458,7 @@ sequenceDiagram
 
 ## Pipeline de entrada (#10)
 
-`InboundPipeline` (`InboundPipeline.java:15-83`) orquesta un webhook entrante: es el flujo entrante de
+`InboundPipeline` (`InboundPipeline.java:16-82`) orquesta un webhook entrante: es el flujo entrante de
 `docs/vision.md` §5, pasos 1 a 5, más los reportes de estado de los mensajes salientes. Vive en `channels` porque usa
 las piezas package-private del módulo (cuenta, directorio, registro, payload) y porque `messaging` no puede orquestar
 sin armar un ciclo (P-038, P-049). No tiene endpoint HTTP: lo expone, con su seguridad y la traducción de las
@@ -532,17 +535,18 @@ sandbox-out-1:     pasa a READ si es un mensaje de esa cuenta con un estado de r
 
 ### Parsear todo, después escribir
 
-`receive` (`InboundPipeline.java:41-54`):
+`receive` (`InboundPipeline.java:43-54`):
 
-1. `adapters.adapterFor(channelType)` (`:42`).
-2. `adapter.parseInbound(payload)` y `adapter.parseStatusUpdates(payload)` (`:43-44`), **antes de la primera
+1. `adapters.adapterFor(channelType)` (`:44`).
+2. `adapter.parseInbound(payload)` y `adapter.parseStatusUpdates(payload)` (`:45-46`), **antes de la primera
    escritura**. Con el sandbox, cada parseo arma las dos listas (P-048), así que un payload inválido falla en el
    primero; pero el orden no depende de eso: un adaptador que validara cada lista por separado tampoco dejaría nada a
    medio escribir.
-3. Los mensajes, en el orden del payload (`:45-48`): por cada uno, `accountReceiving` y, si hay cuenta,
-   `currentOrganization.runAs(account.organizationId(), () -> accept(account, inbound))`.
-4. Después los estados, en el orden del payload (`:49-53`): por cada uno, `accountReceiving` y, si hay cuenta,
-   `runAs(account.organizationId(), () -> timeline.applyStatus(account.id(), update.externalId(), update.status()))`.
+3. Los mensajes, en el orden del payload (`:47-49`): por cada uno, `inOrganizationOf(channelType,
+   externalAccountId, account -> accept(account, inbound))`, que resuelve la cuenta y, si existe, corre `accept` dentro
+   de `currentOrganization.runAs(account.organizationId(), ...)`.
+4. Después los estados, en el orden del payload (`:50-53`): por cada uno, `inOrganizationOf` con
+   `account -> timeline.applyStatus(account.id(), update.externalId(), update.status())`.
    Van después de los mensajes porque un estado del mismo payload puede referirse a un mensaje recién guardado.
 
 Cada mensaje y cada estado resuelve su cuenta y abre su propio `runAs`, aunque el payload del sandbox traiga una sola
@@ -550,16 +554,16 @@ cuenta: en el puerto, cada `InboundMessage` y cada `StatusUpdate` trae su propio
 
 ### Un mensaje (`accept`)
 
-Dentro del `runAs` de la organización de la cuenta (`InboundPipeline.java:70-82`), sin transacción propia:
+Dentro del `runAs` de la organización de la cuenta (`InboundPipeline.java:69-81`), sin transacción propia:
 
-1. `timeline.isRecorded(account.id(), inbound.externalId())` (`:71-73`, transacción de solo lectura). Si ya está,
+1. `timeline.isRecorded(account.id(), inbound.externalId())` (`:70-72`, transacción de solo lectura). Si ya está,
    corta: un reenvío no crea persona, no cuenta como actividad y no publica evento.
-2. `people.resolveOrCreate(inbound.sender())` (`:74`, transacción 1, P-029).
-3. `opportunities.recordActivity(personId, account.channelType().name())` (`:75`, transacción 2, P-035). La fuente es
+2. `people.resolveOrCreate(inbound.sender())` (`:73`, transacción 1, P-029).
+3. `opportunities.recordActivity(personId, account.channelType().name())` (`:74`, transacción 2, P-035). La fuente es
    el nombre del canal de la cuenta (`"SANDBOX"`, después `"WHATSAPP"`); solo se usa si se abre una oportunidad nueva.
-4. `timeline.recordReceived(new ReceivedMessage(...))` (`:76-77`, transacción 3, P-042), con el canal tomado de la
+4. `timeline.recordReceived(new ReceivedMessage(...))` (`:75-76`, transacción 3, P-042), con el canal tomado de la
    cuenta (`account.channelType()`), que es lo que cumple la FK de tres columnas (P-045).
-5. Si `!recorded.duplicate()`, `events.publishEvent(new MessageReceived(...))` (`:78-81`), con el `organizationId` de
+5. Si `!recorded.duplicate()`, `events.publishEvent(new MessageReceived(...))` (`:77-80`), con el `organizationId` de
    la cuenta (el accesor de la entidad, `.claude/rules/java.md`). Se publica fuera de toda transacción: la 3 ya
    confirmó.
 
@@ -615,26 +619,26 @@ sequenceDiagram
 ### Estados de entrega
 
 Por cada `StatusUpdate`: `resolve` de la cuenta, `runAs` de su organización y `Timeline.applyStatus(account.id(),
-externalId, status)` (`InboundPipeline.java:49-53`), que es `@Transactional` y bloquea la fila del mensaje. El
+externalId, status)` (`InboundPipeline.java:50-53`), que es `@Transactional` y bloquea la fila del mensaje. El
 resultado (`ADVANCED`, `UNCHANGED` o `UNKNOWN_MESSAGE`) no se usa: un estado que no hace avanzar (llegó tarde, P-041) o
 de un mensaje que no está en esa cuenta se ignora sin error y sin log, y el pipeline sigue con el próximo. Los estados
 no publican evento (la notificación del cambio de estado es de #15, `docs/mensajes.md`).
 
 ### Cuenta desconocida
 
-`accountReceiving` (`InboundPipeline.java:56-63`) llama a `resolve` y, si vuelve vacío, loguea un WARN y devuelve
-vacío, así que el mensaje o el estado se descarta sin excepción ni escritura: no hay organización a la que asignarlo
-(P-050), y el resto del payload se sigue procesando. El mismo WARN sirve para mensajes y estados:
+`inOrganizationOf` (`InboundPipeline.java:56-62`) llama a `resolve` y, si vuelve vacío, loguea un WARN (`:60-61`) en vez
+de abrir el `runAs` (`:59`), así que el mensaje o el estado se descarta sin excepción ni escritura: no hay organización
+a la que asignarlo (P-050), y el resto del payload se sigue procesando. El mismo WARN sirve para mensajes y estados:
 
 ```
 Inbound SANDBOX notification for unknown channel account sandbox-desconocida was discarded
 ```
 
 Lleva solo el tipo de canal y el id de nuestra cuenta, nunca el remitente ni el texto. El id viene del payload, que
-todavía no tiene firma verificada: antes de loguearlo, el privado `loggable` (`InboundPipeline.java:65-68`) reemplaza
-cada carácter de control ASCII (`\p{Cntrl}`, entre ellos CR y LF) por `_` y después lo trunca a 64 caracteres
-(`MAX_LOGGED_ID_LENGTH`, `:19`), para que un payload no pueda falsear líneas del log ni inflarlo. Por ejemplo,
-`"cuenta\r\nWARN falso"` se loguea como `cuenta__WARN falso`.
+todavía no tiene firma verificada: antes de loguearlo, el privado `loggable` (`InboundPipeline.java:64-67`) lo trunca a
+64 caracteres (`MAX_LOGGED_ID_LENGTH`, `:20`) y reemplaza cada carácter de control ASCII (`CONTROL_CHARACTERS`,
+`\p{Cntrl}`, `:21`; entre ellos CR y LF) por `_`, para que un payload no pueda falsear líneas del log ni inflarlo. Por
+ejemplo, `"cuenta\r\nWARN falso"` se loguea como `cuenta__WARN falso`.
 
 ### Carreras y falla parcial
 
@@ -658,7 +662,7 @@ public record MessageReceived(UUID organizationId, UUID messageId, UUID personId
 ```
 
 - Lo publica `InboundPipeline` con el `ApplicationEventPublisher` de Spring, **solo si el mensaje no era un duplicado**
-  (`InboundPipeline.java:78-81`), dentro del `runAs` pero **fuera de toda transacción**. Un reenvío o una copia que
+  (`InboundPipeline.java:77-80`), dentro del `runAs` pero **fuera de toda transacción**. Un reenvío o una copia que
   perdió la carrera no publica nada.
 - Es de `channels` (no de `messaging`, que no orquesta, P-038) y es público para que otros módulos lo escuchen. Lleva
   solo ids y el canal: ni el texto ni la identidad del remitente. No dice si la oportunidad es nueva: eso lo resuelve
@@ -847,7 +851,9 @@ el pipeline real del contexto (registro con el `SandboxChannelAdapter`, director
   `Timeline.recordSent`), y consulta la base con `JdbcTemplate` filtrando por organización (`identitiesOf`,
   `opportunitiesOf`, `messagesOf`) o en todas (`identitiesInAnyOrganizationWithValue`,
   `messagesInAnyOrganizationWithExternalId`). Para la carrera, `rivalStartsRecordingMessage` inserta por SQL un mensaje
-  sin confirmar y `anotherSessionIsWaitingToWriteMessages` mira `pg_stat_activity`.
+  sin confirmar y `anotherSessionIsWaitingToWriteMessages` mira `pg_stat_activity`. Las filas se comparan enteras con
+  los records `StoredIdentity`, `StoredOpportunity` y `StoredMessage`, y el evento esperado sale de la fila guardada
+  con `StoredMessage.event(organizationId)`.
 - `ReceivedMessages`: `@Component` de `src/test` con un `@EventListener` síncrono que junta los `MessageReceived` en
   una `ConcurrentLinkedQueue`; se vacía en `@BeforeEach` y se consulta por organización (`in`) o entera (`all`). No se
   usa `@RecordApplicationEvents` porque está ligado al hilo del test, y la carrera publica desde otro.

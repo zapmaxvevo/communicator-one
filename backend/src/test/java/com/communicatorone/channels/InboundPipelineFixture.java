@@ -35,8 +35,6 @@ class InboundPipelineFixture {
 
     static final Duration TIMEOUT = Duration.ofSeconds(10);
 
-    private static final String UNUSED_PHONE_PREFIX = "+549116";
-
     private final JdbcTemplate jdbcTemplate;
     private final TransactionTemplate transactionTemplate;
     private final ExecutorService background;
@@ -62,7 +60,7 @@ class InboundPipelineFixture {
     }
 
     String unusedPhone() {
-        return UNUSED_PHONE_PREFIX + "%07d".formatted(ThreadLocalRandom.current().nextInt(10_000_000));
+        return "+549116%07d".formatted(ThreadLocalRandom.current().nextInt(10_000_000));
     }
 
     WebhookPayload messagesTo(String externalAccountId, IncomingText... messages) {
@@ -77,7 +75,7 @@ class InboundPipelineFixture {
         return currentOrganization.callAs(organizationId, () -> {
             var personId = people.resolveOrCreate(ContactIdentity.phone(phone));
             var opportunityId = opportunities.recordActivity(personId, ChannelType.SANDBOX.name());
-            return new Conversation(organizationId, personId, opportunityId);
+            return new Conversation(personId, opportunityId);
         });
     }
 
@@ -220,7 +218,7 @@ class InboundPipelineFixture {
         }
     }
 
-    record Conversation(UUID organizationId, UUID personId, UUID opportunityId) {
+    record Conversation(UUID personId, UUID opportunityId) {
     }
 
     record StoredIdentity(UUID personId, IdentityKind kind, String value) {
@@ -248,6 +246,10 @@ class InboundPipelineFixture {
                 String externalId, String text, Instant occurredAt, Instant recordedAt) {
             return new StoredMessage(id, personId, opportunityId, channelAccountId, ChannelType.SANDBOX,
                     SenderType.CUSTOMER, externalId, text, MessageStatus.DELIVERED, occurredAt, recordedAt);
+        }
+
+        MessageReceived event(UUID organizationId) {
+            return new MessageReceived(organizationId, id, personId, opportunityId, channelAccountId, channel);
         }
 
         StoredMessage withStatus(MessageStatus newStatus) {

@@ -82,7 +82,7 @@ Quien llama a `resolveOrCreate`:
 3. **Construye la `ContactIdentity` antes**, y atrapa `InvalidContactIdentityException` si el dato que trae el proveedor
    no es válido.
 
-Orden en el flujo entrante, como quedó en `InboundPipeline.accept` (#10, `InboundPipeline.java:70-82`; detalle en
+Orden en el flujo entrante, como quedó en `InboundPipeline.accept` (#10, `InboundPipeline.java:69-81`; detalle en
 `docs/canales.md`): dentro del `runAs` de la organización de la cuenta de canal, primero `Timeline.isRecorded` (solo
 lectura), para que un reenvío del proveedor no cree la persona ni cuente como actividad, y después tres transacciones
 de escritura, una por paso. La persona se confirma en la suya **antes** de la oportunidad

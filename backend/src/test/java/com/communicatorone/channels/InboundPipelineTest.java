@@ -95,15 +95,14 @@ class InboundPipelineTest {
         pipeline.receive(ChannelType.SANDBOX, payload);
 
         // Then
-        var opportunity = only(fixture.opportunitiesOf(acme));
-        var message = only(fixture.messagesOf(acme));
+        var opportunity = assertThat(fixture.opportunitiesOf(acme)).singleElement().actual();
+        var message = assertThat(fixture.messagesOf(acme)).singleElement().actual();
         var person = opportunity.personId();
         assertThat(fixture.identitiesOf(acme)).containsExactly(new StoredIdentity(person, IdentityKind.PHONE, ANA));
         assertThat(opportunity).isEqualTo(StoredOpportunity.open(opportunity.id(), person, NOW, NOW));
         assertThat(message).isEqualTo(StoredMessage.received(message.id(), person, opportunity.id(), account.id(),
                 messageId, "Hola, ¿tienen financiación?", SENT_AT, NOW));
-        assertThat(receivedMessages.in(acme)).containsExactly(
-                new MessageReceived(acme, message.id(), person, opportunity.id(), account.id(), ChannelType.SANDBOX));
+        assertThat(receivedMessages.in(acme)).containsExactly(message.event(acme));
     }
 
     @Test
@@ -121,15 +120,14 @@ class InboundPipelineTest {
         pipeline.receive(ChannelType.SANDBOX, payload);
 
         // Then
-        var opportunity = only(fixture.opportunitiesOf(acme));
-        var message = only(fixture.messagesOf(acme));
+        var opportunity = assertThat(fixture.opportunitiesOf(acme)).singleElement().actual();
+        var message = assertThat(fixture.messagesOf(acme)).singleElement().actual();
         var person = opportunity.personId();
         assertThat(fixture.identitiesOf(acme)).containsExactly(new StoredIdentity(person, IdentityKind.PHONE, ANA));
         assertThat(opportunity).isEqualTo(StoredOpportunity.open(opportunity.id(), person, NOW, NOW));
         assertThat(message).isEqualTo(StoredMessage.received(message.id(), person, opportunity.id(), account.id(),
                 messageId, "Hola", SENT_AT, NOW));
-        assertThat(receivedMessages.in(acme)).containsExactly(
-                new MessageReceived(acme, message.id(), person, opportunity.id(), account.id(), ChannelType.SANDBOX));
+        assertThat(receivedMessages.in(acme)).containsExactly(message.event(acme));
     }
 
     @Test
@@ -146,15 +144,14 @@ class InboundPipelineTest {
         pipeline.receive(ChannelType.SANDBOX, payload);
 
         // Then
-        var opportunity = only(fixture.opportunitiesOf(acme));
-        var message = only(fixture.messagesOf(acme));
+        var opportunity = assertThat(fixture.opportunitiesOf(acme)).singleElement().actual();
+        var message = assertThat(fixture.messagesOf(acme)).singleElement().actual();
         var person = opportunity.personId();
         assertThat(fixture.identitiesOf(acme)).containsExactly(new StoredIdentity(person, IdentityKind.PHONE, ANA));
         assertThat(opportunity).isEqualTo(StoredOpportunity.open(opportunity.id(), person, NOW, NOW));
         assertThat(message).isEqualTo(StoredMessage.received(message.id(), person, opportunity.id(), account.id(),
                 messageId, "Hola", SENT_AT, NOW));
-        assertThat(receivedMessages.in(acme)).containsExactly(
-                new MessageReceived(acme, message.id(), person, opportunity.id(), account.id(), ChannelType.SANDBOX));
+        assertThat(receivedMessages.in(acme)).containsExactly(message.event(acme));
     }
 
     @Test
@@ -174,7 +171,7 @@ class InboundPipelineTest {
                 new IncomingText(secondId, ANA, "¿Y en cuántas cuotas?", wroteAgainAt.minusSeconds(10))));
 
         // Then
-        var opportunity = only(fixture.opportunitiesOf(acme));
+        var opportunity = assertThat(fixture.opportunitiesOf(acme)).singleElement().actual();
         var person = opportunity.personId();
         var messages = fixture.messagesOf(acme);
         assertThat(fixture.identitiesOf(acme)).containsExactly(new StoredIdentity(person, IdentityKind.PHONE, ANA));
@@ -185,11 +182,8 @@ class InboundPipelineTest {
                         "Hola, ¿tienen financiación?", SENT_AT, NOW),
                 StoredMessage.received(messages.get(1).id(), person, opportunity.id(), account.id(), secondId,
                         "¿Y en cuántas cuotas?", wroteAgainAt.minusSeconds(10), wroteAgainAt));
-        assertThat(receivedMessages.in(acme)).containsExactly(
-                new MessageReceived(acme, messages.get(0).id(), person, opportunity.id(), account.id(),
-                        ChannelType.SANDBOX),
-                new MessageReceived(acme, messages.get(1).id(), person, opportunity.id(), account.id(),
-                        ChannelType.SANDBOX));
+        assertThat(receivedMessages.in(acme)).containsExactly(messages.get(0).event(acme),
+                messages.get(1).event(acme));
     }
 
     @Test
@@ -226,11 +220,8 @@ class InboundPipelineTest {
                         "Hola, ¿tienen financiación?", SENT_AT, NOW),
                 StoredMessage.received(messages.get(1).id(), person, current.id(), account.id(), returningId,
                         "Hola de nuevo", returnedAt.minusSeconds(10), returnedAt));
-        assertThat(receivedMessages.in(acme)).containsExactly(
-                new MessageReceived(acme, messages.get(0).id(), person, previous.id(), account.id(),
-                        ChannelType.SANDBOX),
-                new MessageReceived(acme, messages.get(1).id(), person, current.id(), account.id(),
-                        ChannelType.SANDBOX));
+        assertThat(receivedMessages.in(acme)).containsExactly(messages.get(0).event(acme),
+                messages.get(1).event(acme));
     }
 
     @Test
@@ -251,13 +242,14 @@ class InboundPipelineTest {
         var identities = fixture.identitiesOf(acme);
         var ana = personWithPhone(identities, ANA);
         var juan = personWithPhone(identities, JUAN);
-        var anaOpportunity = opportunityOf(fixture.opportunitiesOf(acme), ana);
-        var juanOpportunity = opportunityOf(fixture.opportunitiesOf(acme), juan);
+        var opportunities = fixture.opportunitiesOf(acme);
+        var anaOpportunity = opportunityOf(opportunities, ana);
+        var juanOpportunity = opportunityOf(opportunities, juan);
         var messages = fixture.messagesOf(acme);
         assertThat(ana).isNotEqualTo(juan);
         assertThat(identities).containsExactlyInAnyOrder(new StoredIdentity(ana, IdentityKind.PHONE, ANA),
                 new StoredIdentity(juan, IdentityKind.PHONE, JUAN));
-        assertThat(fixture.opportunitiesOf(acme)).containsExactlyInAnyOrder(
+        assertThat(opportunities).containsExactlyInAnyOrder(
                 StoredOpportunity.open(anaOpportunity.id(), ana, NOW, NOW),
                 StoredOpportunity.open(juanOpportunity.id(), juan, NOW, NOW));
         assertThat(messages).hasSize(2);
@@ -266,11 +258,8 @@ class InboundPipelineTest {
                         "Hola, ¿tienen financiación?", SENT_AT, NOW),
                 StoredMessage.received(messages.get(1).id(), juan, juanOpportunity.id(), account.id(), fromJuan,
                         "¿Hacen envíos al interior?", SENT_AT.plusSeconds(5), NOW));
-        assertThat(receivedMessages.in(acme)).containsExactly(
-                new MessageReceived(acme, messages.get(0).id(), ana, anaOpportunity.id(), account.id(),
-                        ChannelType.SANDBOX),
-                new MessageReceived(acme, messages.get(1).id(), juan, juanOpportunity.id(), account.id(),
-                        ChannelType.SANDBOX));
+        assertThat(receivedMessages.in(acme)).containsExactly(messages.get(0).event(acme),
+                messages.get(1).event(acme));
     }
 
     @Test
@@ -290,10 +279,10 @@ class InboundPipelineTest {
                 new IncomingText(toGlobex, ANA, "Hola Globex", SENT_AT)));
 
         // Then
-        var acmeOpportunity = only(fixture.opportunitiesOf(acme));
-        var globexOpportunity = only(fixture.opportunitiesOf(globex));
-        var acmeMessage = only(fixture.messagesOf(acme));
-        var globexMessage = only(fixture.messagesOf(globex));
+        var acmeOpportunity = assertThat(fixture.opportunitiesOf(acme)).singleElement().actual();
+        var globexOpportunity = assertThat(fixture.opportunitiesOf(globex)).singleElement().actual();
+        var acmeMessage = assertThat(fixture.messagesOf(acme)).singleElement().actual();
+        var globexMessage = assertThat(fixture.messagesOf(globex)).singleElement().actual();
         var acmePerson = acmeOpportunity.personId();
         var globexPerson = globexOpportunity.personId();
         assertThat(acmePerson).isNotEqualTo(globexPerson);
@@ -308,10 +297,8 @@ class InboundPipelineTest {
                 acmeAccount.id(), toAcme, "Hola Acme", SENT_AT, NOW));
         assertThat(globexMessage).isEqualTo(StoredMessage.received(globexMessage.id(), globexPerson,
                 globexOpportunity.id(), globexAccount.id(), toGlobex, "Hola Globex", SENT_AT, NOW));
-        assertThat(receivedMessages.in(acme)).containsExactly(new MessageReceived(acme, acmeMessage.id(),
-                acmePerson, acmeOpportunity.id(), acmeAccount.id(), ChannelType.SANDBOX));
-        assertThat(receivedMessages.in(globex)).containsExactly(new MessageReceived(globex, globexMessage.id(),
-                globexPerson, globexOpportunity.id(), globexAccount.id(), ChannelType.SANDBOX));
+        assertThat(receivedMessages.in(acme)).containsExactly(acmeMessage.event(acme));
+        assertThat(receivedMessages.in(globex)).containsExactly(globexMessage.event(globex));
     }
 
     @Test
@@ -332,7 +319,7 @@ class InboundPipelineTest {
                 new IncomingText(toSupport, ANA, "Escribo también por acá", wroteAgainAt.minusSeconds(10))));
 
         // Then
-        var opportunity = only(fixture.opportunitiesOf(acme));
+        var opportunity = assertThat(fixture.opportunitiesOf(acme)).singleElement().actual();
         var person = opportunity.personId();
         var messages = fixture.messagesOf(acme);
         assertThat(fixture.identitiesOf(acme)).containsExactly(new StoredIdentity(person, IdentityKind.PHONE, ANA));
@@ -343,11 +330,8 @@ class InboundPipelineTest {
                         "Hola, ¿tienen financiación?", SENT_AT, NOW),
                 StoredMessage.received(messages.get(1).id(), person, opportunity.id(), supportAccount.id(),
                         toSupport, "Escribo también por acá", wroteAgainAt.minusSeconds(10), wroteAgainAt));
-        assertThat(receivedMessages.in(acme)).containsExactly(
-                new MessageReceived(acme, messages.get(0).id(), person, opportunity.id(), salesAccount.id(),
-                        ChannelType.SANDBOX),
-                new MessageReceived(acme, messages.get(1).id(), person, opportunity.id(), supportAccount.id(),
-                        ChannelType.SANDBOX));
+        assertThat(receivedMessages.in(acme)).containsExactly(messages.get(0).event(acme),
+                messages.get(1).event(acme));
     }
 
     @Test
@@ -482,16 +466,13 @@ class InboundPipelineTest {
         assertThat(receivedMessages.all()).isEmpty();
     }
 
-    private static <T> T only(List<T> elements) {
-        assertThat(elements).hasSize(1);
-        return elements.getFirst();
-    }
-
     private static UUID personWithPhone(List<StoredIdentity> identities, String phone) {
-        return only(identities.stream().filter(identity -> identity.value().equals(phone)).toList()).personId();
+        return assertThat(identities).filteredOn(identity -> identity.value().equals(phone)).singleElement().actual()
+                .personId();
     }
 
     private static StoredOpportunity opportunityOf(List<StoredOpportunity> opportunities, UUID personId) {
-        return only(opportunities.stream().filter(opportunity -> opportunity.personId().equals(personId)).toList());
+        return assertThat(opportunities).filteredOn(opportunity -> opportunity.personId().equals(personId))
+                .singleElement().actual();
     }
 }
