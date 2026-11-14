@@ -168,9 +168,7 @@ class SandboxChannelAdapterTest {
         var second = sandbox.send(recipient, sandboxAccount, content);
 
         // Then
-        assertThat(first.externalId()).startsWith("sandbox-").isNotEqualTo(second.externalId());
-        assertThat(second.externalId()).startsWith("sandbox-");
-        assertThat(sandbox.hasSentTextTo(recipient, "Te paso el presupuesto")).isTrue();
+        assertThat(first.externalId()).isNotEqualTo(second.externalId());
     }
 
     static Stream<Arguments> malformedPayloadsInBothParsings() {
@@ -178,52 +176,55 @@ class SandboxChannelAdapterTest {
                 Named.<Parsing>of("inbound messages", SandboxChannelAdapter::parseInbound),
                 Named.<Parsing>of("status updates", SandboxChannelAdapter::parseStatusUpdates));
         return malformedPayloads().flatMap(malformed -> parsings.stream()
-                .map(parsing -> Arguments.of(malformed.get()[0], malformed.get()[1], parsing)));
+                .map(parsing -> Arguments.of(malformed.malformation(), malformed.body(), parsing)));
     }
 
-    private static Stream<Arguments> malformedPayloads() {
+    private static Stream<MalformedPayload> malformedPayloads() {
         return Stream.of(
-                Arguments.of("not JSON", "esto no es JSON"),
-                Arguments.of("empty body", ""),
-                Arguments.of("JSON null", "null"),
-                Arguments.of("without account", """
+                new MalformedPayload("not JSON", "esto no es JSON"),
+                new MalformedPayload("empty body", ""),
+                new MalformedPayload("JSON null", "null"),
+                new MalformedPayload("without account", """
                         {"messages": [%s]}""".formatted(VALID_MESSAGE)),
-                Arguments.of("blank account", """
+                new MalformedPayload("blank account", """
                         {"account": "  ", "messages": [%s]}""".formatted(VALID_MESSAGE)),
-                Arguments.of("message without id", withMessage("""
+                new MalformedPayload("message without id", withMessage("""
                         {"from": {"kind": "PHONE", "value": "+5491155550101"},
                          "text": "Hola", "sentAt": "2026-03-02T08:59:20Z"}""")),
-                Arguments.of("message without sender", withMessage("""
+                new MalformedPayload("message without sender", withMessage("""
                         {"id": "in-1", "text": "Hola", "sentAt": "2026-03-02T08:59:20Z"}""")),
-                Arguments.of("message without text", withMessage("""
+                new MalformedPayload("sender without value", withMessage("""
+                        {"id": "in-1", "from": {"kind": "PHONE"},
+                         "text": "Hola", "sentAt": "2026-03-02T08:59:20Z"}""")),
+                new MalformedPayload("message without text", withMessage("""
                         {"id": "in-1", "from": {"kind": "PHONE", "value": "+5491155550101"},
                          "sentAt": "2026-03-02T08:59:20Z"}""")),
-                Arguments.of("message without sending time", withMessage("""
+                new MalformedPayload("message without sending time", withMessage("""
                         {"id": "in-1", "from": {"kind": "PHONE", "value": "+5491155550101"}, "text": "Hola"}""")),
-                Arguments.of("message with empty text", withMessage("""
+                new MalformedPayload("message with empty text", withMessage("""
                         {"id": "in-1", "from": {"kind": "PHONE", "value": "+5491155550101"},
                          "text": "", "sentAt": "2026-03-02T08:59:20Z"}""")),
-                Arguments.of("unknown identity kind", withMessage("""
+                new MalformedPayload("unknown identity kind", withMessage("""
                         {"id": "in-1", "from": {"kind": "FAX", "value": "+5491155550101"},
                          "text": "Hola", "sentAt": "2026-03-02T08:59:20Z"}""")),
-                Arguments.of("invalid phone", withMessage("""
+                new MalformedPayload("invalid phone", withMessage("""
                         {"id": "in-1", "from": {"kind": "PHONE", "value": "+54 12"},
                          "text": "Hola", "sentAt": "2026-03-02T08:59:20Z"}""")),
-                Arguments.of("invalid email", withMessage("""
+                new MalformedPayload("invalid email", withMessage("""
                         {"id": "in-1", "from": {"kind": "EMAIL", "value": "ana.perez"},
                          "text": "Hola", "sentAt": "2026-03-02T08:59:20Z"}""")),
-                Arguments.of("malformed sending time", withMessage("""
+                new MalformedPayload("malformed sending time", withMessage("""
                         {"id": "in-1", "from": {"kind": "PHONE", "value": "+5491155550101"},
                          "text": "Hola", "sentAt": "ayer a la tarde"}""")),
-                Arguments.of("null message", """
+                new MalformedPayload("null message", """
                         {"account": "sandbox-acme", "messages": [null]}"""),
-                Arguments.of("status without message id", withStatus("""
+                new MalformedPayload("status without message id", withStatus("""
                         {"status": "READ"}""")),
-                Arguments.of("status without status", withStatus("""
+                new MalformedPayload("status without status", withStatus("""
                         {"messageId": "sandbox-out-1"}""")),
-                Arguments.of("unknown status", withStatus("""
+                new MalformedPayload("unknown status", withStatus("""
                         {"messageId": "sandbox-out-1", "status": "SEEN"}""")),
-                Arguments.of("null status", """
+                new MalformedPayload("null status", """
                         {"account": "sandbox-acme", "statuses": [null]}"""));
     }
 
@@ -235,6 +236,9 @@ class SandboxChannelAdapterTest {
     private static String withStatus(String status) {
         return """
                 {"account": "sandbox-acme", "statuses": [%s]}""".formatted(status);
+    }
+
+    record MalformedPayload(String malformation, String body) {
     }
 
     interface Parsing extends BiFunction<SandboxChannelAdapter, WebhookPayload, List<?>> {

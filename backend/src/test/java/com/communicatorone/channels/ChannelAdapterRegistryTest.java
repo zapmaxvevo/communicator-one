@@ -15,7 +15,7 @@ class ChannelAdapterRegistryTest {
     void registryReturnsTheAdapterOfItsChannelType() {
         // Given
         var sandbox = new SandboxChannelAdapter();
-        var whatsApp = new WhatsAppAdapterStandIn();
+        var whatsApp = new AdapterStandIn(ChannelType.WHATSAPP);
         var registry = new ChannelAdapterRegistry(List.of(sandbox, whatsApp));
 
         // When
@@ -43,17 +43,29 @@ class ChannelAdapterRegistryTest {
     @Test
     void twoAdaptersForTheSameChannelTypeAreRejected() {
         // Given
-        var adapters = List.<ChannelAdapter>of(new SandboxChannelAdapter(), new AnotherSandboxAdapter());
+        var adapters = List.<ChannelAdapter>of(new SandboxChannelAdapter(),
+                new AdapterStandIn(ChannelType.SANDBOX));
 
         // When
         var rejection = catchThrowable(() -> new ChannelAdapterRegistry(adapters));
 
         // Then
         assertThat(rejection).isInstanceOf(IllegalStateException.class)
-                .hasMessage("Channel type SANDBOX has two adapters: SandboxChannelAdapter and AnotherSandboxAdapter");
+                .hasMessage("Channel type SANDBOX has two adapters: SandboxChannelAdapter and AdapterStandIn");
     }
 
-    private abstract static class AdapterStandIn implements ChannelAdapter {
+    private static final class AdapterStandIn implements ChannelAdapter {
+
+        private final ChannelType type;
+
+        AdapterStandIn(ChannelType type) {
+            this.type = type;
+        }
+
+        @Override
+        public ChannelType type() {
+            return type;
+        }
 
         @Override
         public List<InboundMessage> parseInbound(WebhookPayload payload) {
@@ -68,22 +80,6 @@ class ChannelAdapterRegistryTest {
         @Override
         public SendResult send(ContactIdentity to, ChannelAccount from, MessageContent content) {
             throw new UnsupportedOperationException("The registry does not send messages");
-        }
-    }
-
-    private static final class WhatsAppAdapterStandIn extends AdapterStandIn {
-
-        @Override
-        public ChannelType type() {
-            return ChannelType.WHATSAPP;
-        }
-    }
-
-    private static final class AnotherSandboxAdapter extends AdapterStandIn {
-
-        @Override
-        public ChannelType type() {
-            return ChannelType.SANDBOX;
         }
     }
 }

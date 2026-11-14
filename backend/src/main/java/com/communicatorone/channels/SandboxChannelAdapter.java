@@ -80,10 +80,7 @@ class SandboxChannelAdapter implements ChannelAdapter {
     record SandboxMessage(String id, SandboxSender from, String text, Instant sentAt) {
 
         SandboxMessage {
-            Assert.hasText(id, "A sandbox message needs its id");
             Assert.notNull(from, "A sandbox message needs its sender");
-            Assert.notNull(text, "A sandbox message needs its text");
-            Assert.notNull(sentAt, "A sandbox message needs its sending time");
         }
 
         InboundMessage inboundTo(String account) {
@@ -100,7 +97,6 @@ class SandboxChannelAdapter implements ChannelAdapter {
 
         SandboxSender {
             Assert.notNull(kind, "A sandbox sender needs its identity kind");
-            Assert.notNull(value, "A sandbox sender needs its identity value");
         }
 
         ContactIdentity identity() {
@@ -114,11 +110,6 @@ class SandboxChannelAdapter implements ChannelAdapter {
     }
 
     record SandboxStatus(String messageId, MessageStatus status) {
-
-        SandboxStatus {
-            Assert.hasText(messageId, "A sandbox status needs the id of its message");
-            Assert.notNull(status, "A sandbox status needs its status");
-        }
 
         StatusUpdate updateOf(String account) {
             return new StatusUpdate(account, messageId, status);
