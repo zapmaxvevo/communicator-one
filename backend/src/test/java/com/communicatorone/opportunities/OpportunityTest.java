@@ -112,6 +112,45 @@ class OpportunityTest {
         assertClosedWithoutResponse(opportunity, whenTheInactivityPeriodEnds);
     }
 
+    @Test
+    void inactiveOpportunityIsClosedWithoutResponseAtTheEndOfItsInactivity() {
+        // Given
+        var opportunity = Opportunity.openFor(UUID.randomUUID(), SOURCE, OPENED_AT);
+        var hoursAfterTheInactivityPeriodEnds = OPENED_AT.plus(INACTIVITY_PERIOD).plus(Duration.ofHours(3));
+
+        // When
+        opportunity.closeIfInactiveAt(hoursAfterTheInactivityPeriodEnds, SETTINGS);
+
+        // Then
+        assertClosedWithoutResponse(opportunity, OPENED_AT.plus(INACTIVITY_PERIOD));
+    }
+
+    @Test
+    void opportunityStillWithinItsInactivityPeriodIsNotClosed() {
+        // Given
+        var opportunity = Opportunity.openFor(UUID.randomUUID(), SOURCE, OPENED_AT);
+        var justBeforeBecomingInactive = OPENED_AT.plus(INACTIVITY_PERIOD).minus(ONE_SECOND);
+
+        // When
+        opportunity.closeIfInactiveAt(justBeforeBecomingInactive, SETTINGS);
+
+        // Then
+        assertOpen(opportunity, OPENED_AT);
+    }
+
+    @Test
+    void closingAnAlreadyClosedOpportunityAgainChangesNothing() {
+        // Given
+        var opportunity = Opportunity.openFor(UUID.randomUUID(), SOURCE, OPENED_AT);
+        opportunity.closeIfInactiveAt(OPENED_AT.plus(Duration.ofDays(8)), SETTINGS);
+
+        // When
+        opportunity.closeIfInactiveAt(OPENED_AT.plus(Duration.ofDays(20)), SETTINGS);
+
+        // Then
+        assertClosedWithoutResponse(opportunity, OPENED_AT.plus(INACTIVITY_PERIOD));
+    }
+
     @ParameterizedTest
     @NullAndEmptySource
     @ValueSource(strings = "   ")

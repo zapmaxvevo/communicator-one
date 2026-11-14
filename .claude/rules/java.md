@@ -80,11 +80,12 @@ y local sobre un enum propio del módulo está bien; lo que se evita es repartir
 - La organización activa la da `CurrentOrganization` (módulo `organizations`): el ámbito explícito de `runAs`/`callAs`
   o, si no hay, el principal autenticado que implementa `OrganizationMember`. Sin ninguno de los dos, las lecturas
   vuelven vacías y las escrituras fallan.
-- SQL nativo y `JdbcTemplate` **no** pasan por `@TenantId`: filtran por `organization_id` a mano, siempre. Única
-  excepción: `OperatorEmailDirectory` (módulo `operators`, P-022) busca por email sin filtrar organización porque el
-  login todavía no tiene una; solo devuelve el `organization_id`, y el operador se carga después con `callAs` y la
-  lectura filtrada (`docs/autenticacion.md`). Otra consulta que cruce organizaciones se decide en su tarea y se anota
-  como provisoria.
+- SQL nativo y `JdbcTemplate` **no** pasan por `@TenantId`: filtran por `organization_id` a mano, siempre. Hay dos
+  excepciones, y las dos devuelven solo ids de organización: `OperatorEmailDirectory` (módulo `operators`, P-022)
+  busca por email sin filtrar organización porque el login todavía no tiene una, y el operador se carga después con
+  `callAs` y la lectura filtrada (`docs/autenticacion.md`); `OpportunityClosingJob` (módulo `opportunities`, P-037)
+  lista las organizaciones con oportunidades abiertas y procesa cada una con `runAs` y lecturas filtradas
+  (`docs/oportunidades.md`). Otra consulta que cruce organizaciones se decide en su tarea y se anota como provisoria.
 - Procesos sin usuario (webhooks, jobs, listeners) llaman a `currentOrganization.runAs(organizationId, ...)` **fuera**
   de la transacción, con el `@Transactional` adentro: la organización se fija al abrir la sesión, y `runAs` lanza
   `IllegalStateException` si hay sincronización de transacción activa (una transacción o un ámbito `SUPPORTS`) o si ya
@@ -110,6 +111,9 @@ y local sobre un enum propio del módulo está bien; lo que se evita es repartir
 ## Configuración y seguridad
 - Propiedades con `@ConfigurationProperties`; credenciales y URLs de proveedores por variables de entorno, listadas en
   `.env.example`. Nunca valores reales en el repo.
+- El cron de un `@Scheduled` va como placeholder `${...}` sin default, con el valor en `application.yml`
+  (`@Scheduled(cron = "${communicator-one.opportunities.closing-cron}")`). Los tests lo desactivan con `"-"`
+  (`Scheduled.CRON_DISABLED`) desde `TestcontainersConfiguration` y llaman al método directamente.
 - Webhooks: validar la firma del proveedor antes de procesar.
 - Logs con SLF4J. Teléfonos, emails y contenido de mensajes no van a logs de nivel `INFO` o superior. Tampoco a
   mensajes de excepción ni a `toString`: los value objects con datos personales muestran solo lo que no identifica

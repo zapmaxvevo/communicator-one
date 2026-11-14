@@ -34,8 +34,8 @@ scripts/             issues.py (issues, subissues y estados del Project con gh)
 En `backend/`, cada módulo de Spring Modulith es un subpaquete directo de `com.communicatorone` con un
 `package-info.java` anotado `@ApplicationModule`. Son ocho: `organizations`, `operators`, `people`, `opportunities`,
 `messaging`, `channels`, `assignment`, `notifications`. La configuración transversal (como `SecurityConfiguration`,
-`ApiExceptionHandler` y `ClockConfiguration`) va en el paquete raíz: un subpaquete directo nuevo es un módulo más y
-rompe `ModularStructureTest` a propósito.
+`ApiExceptionHandler`, `ClockConfiguration` y `SchedulingConfiguration`) va en el paquete raíz: un subpaquete directo
+nuevo es un módulo más y rompe `ModularStructureTest` a propósito.
 
 ## Comandos
 
@@ -58,7 +58,11 @@ docker compose down -v      # además borra el volumen de Postgres (reset del en
   cambian usuario o clave, la app falla al autenticar; si cambia `POSTGRES_DB`, la base no existe. En los dos casos:
   `docker compose down -v && docker compose up -d`.
 - `JWT_SECRET` es obligatoria (sin default, P-023): sin ella, en blanco o con menos de 32 bytes, la app no arranca.
-  Las demás variables tienen defaults que coinciden con compose y `application.yml`.
+  Las demás variables tienen defaults que coinciden con compose y `application.yml`. La opcional
+  `COMMUNICATOR_ONE_OPPORTUNITIES_CLOSING_CRON` (comentada en `.env.example`) cambia el horario del job de cierre de
+  oportunidades (cada hora por defecto); `-` lo apaga. La opcional `COMMUNICATOR_ONE_OPPORTUNITIES_CLOSING_LOCK_TIMEOUT`
+  (también comentada) cambia cuánto espera ese job por una fila bloqueada antes de saltear la organización (`10s` por
+  defecto; sin unidad son milisegundos; `0` = sin límite).
 - Spring no lee `.env`: hay que exportar sus variables antes de correr la app, desde `backend/`:
   `set -a; . ../.env; set +a; ./mvnw spring-boot:run`. Los tests no necesitan `JWT_SECRET`
   (`TestcontainersConfiguration` registra un secreto solo de test).
@@ -85,6 +89,13 @@ tests, Flyway también toma `src/test/resources/db/migration` del classpath, con
 los tests, porque la entidad está en todos los contextos y `ddl-auto=validate` exige su tabla. Por esa migración de
 test, todo `@SpringBootTest` importa `TestcontainersConfiguration`: sin él, el test usaría la base del compose, le
 dejaría aplicada la `R__` y la app normal fallaría al arrancar (`Validate failed`); ver `.claude/rules/tests.md`.
+
+`TestcontainersConfiguration` también desactiva el cron del job de cierre de oportunidades
+(`communicator-one.opportunities.closing-cron` = `-`), así que el job no queda programado en tests (lo verifica
+`OpportunityClosingJobTest.closingJobDoesNotRunOnItsOwnScheduleDuringTests`; el scheduling sigue activo y Spring
+Modulith Moments registra sus propias tareas), y baja su lock timeout a `2s`
+(`communicator-one.opportunities.closing-lock-timeout`). Los jobs `@Scheduled` se prueban llamando al método
+directamente.
 
 Multi-tenant (P-018): toda entidad de negocio lleva `@TenantId UUID organizationId` y Hibernate filtra y asigna la
 organización activa, que da `CurrentOrganization` (`runAs` para procesos sin usuario, o el principal autenticado que

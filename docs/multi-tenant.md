@@ -82,7 +82,9 @@ flowchart TD
     N --> V[lecturas vacías / escrituras fallan por FK]
 ```
 
-Proceso sin usuario (patrón para webhooks, jobs y listeners):
+Proceso sin usuario (patrón para webhooks, jobs y listeners). El primer job que lo usa es `OpportunityClosingJob`
+(#37, `docs/oportunidades.md`): hace un `runAs` por organización y adentro llama a `InactiveOpportunityClosing`, que
+es `@Transactional`.
 
 ```mermaid
 sequenceDiagram
@@ -155,9 +157,18 @@ job que se olvida el `runAs` no falla al leer, ve vacío.
 
 SQL nativo y `JdbcTemplate` van directo a la base: filtran por `organization_id` a mano. Los `UPDATE`/`DELETE`
 masivos por JPQL no están verificados por ningún test: hasta que lo estén, no dar por hecho que se filtran. Las
-búsquedas que tienen que cruzar organizaciones a propósito se deciden en su tarea. La del operador por email en el
-login quedó resuelta en #5 (P-022): `OperatorEmailDirectory` devuelve solo el `organization_id` y el operador se carga
-con `callAs` y la lectura filtrada (`docs/autenticacion.md`). Falta la `ChannelAccount` de un webhook (#9).
+búsquedas que tienen que cruzar organizaciones a propósito se deciden en su tarea. Hay dos, y las dos devuelven solo
+ids de organización:
+
+- **El operador por email en el login** (#5, P-022): `OperatorEmailDirectory` devuelve solo el `organization_id` y el
+  operador se carga con `callAs` y la lectura filtrada (`docs/autenticacion.md`).
+- **Las organizaciones con oportunidades abiertas, en el job de cierre** (#37, P-037): `OpportunityClosingJob` lista
+  con `JdbcTemplate` (`SELECT DISTINCT organization_id FROM opportunities WHERE status = 'OPEN' ORDER BY
+  organization_id`) y, por cada una, hace `runAs(organizationId, ...)` y llama a un servicio `@Transactional` que lee
+  con el filtro de `@TenantId` de siempre. Si una organización falla, se loguea y sigue con la siguiente
+  (`docs/oportunidades.md`).
+
+Falta la `ChannelAccount` de un webhook (#9).
 
 ## Ejemplos
 

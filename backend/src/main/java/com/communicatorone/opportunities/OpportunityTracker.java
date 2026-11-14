@@ -45,7 +45,7 @@ public class OpportunityTracker {
     }
 
     private UUID currentOpportunityOf(UUID personId, String source) {
-        var currentSettings = settings.findCurrent().orElseGet(OpportunitySettings::defaults);
+        var currentSettings = settings.currentOrDefaults();
         var latest = opportunities.findFirstByPersonIdOrderByOpenedAtDesc(personId);
         var now = clock.instant();
         if (latest.isPresent() && latest.get().recordActivityAt(now, currentSettings)) {

@@ -18,3 +18,6 @@ spring:
 communicator-one:
   authentication:
     jwt-secret: ${JWT_SECRET}
+  opportunities:
+    closing-cron: "0 0 * * * *"
+    closing-lock-timeout: 10s

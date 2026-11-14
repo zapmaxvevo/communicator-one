@@ -62,10 +62,7 @@ class Opportunity {
     }
 
     boolean recordActivityAt(Instant now, OpportunitySettings settings) {
-        var inactivityEndsAt = settings.inactivityEndsAt(lastActivityAt);
-        if (isOpen() && !now.isBefore(inactivityEndsAt)) {
-            closeAsUnanswered(inactivityEndsAt);
-        }
+        closeIfInactiveAt(now, settings);
         if (isOpen()) {
             if (now.isAfter(lastActivityAt)) {
                 lastActivityAt = now;
@@ -77,6 +74,13 @@ class Opportunity {
             return true;
         }
         return false;
+    }
+
+    void closeIfInactiveAt(Instant now, OpportunitySettings settings) {
+        var inactivityEndsAt = settings.inactivityEndsAt(lastActivityAt);
+        if (isOpen() && !now.isBefore(inactivityEndsAt)) {
+            closeAsUnanswered(inactivityEndsAt);
+        }
     }
 
     UUID id() {
