@@ -22,6 +22,7 @@ Leer antes de trabajar:
 
 ```
 backend/             Spring Boot 4 + Maven wrapper, paquete raíz com.communicatorone
+backend/openapi.json contrato OpenAPI de la API, exportado por OpenApiSpecTest (no se edita a mano)
 docker-compose.yml   PostgreSQL 18 y Redis para desarrollo local
 .env.example         variables de entorno (copiar a .env)
 web/                 React 19 + TS estricto + Vite, con ESLint y Vitest (src/{app,features,shared,api})
@@ -72,6 +73,7 @@ Backend, desde `backend/`:
 ```bash
 ./mvnw verify                              # suite completa
 ./mvnw test -Dtest=ModularStructureTest    # estructura de módulos, sin Docker
+./mvnw test -Dtest=OpenApiSpecTest         # con Docker; si openapi.json quedó desfasado, lo regenera y falla
 ./mvnw spring-boot:run                     # necesita el Postgres de compose y JWT_SECRET exportada; puerto 8080 (otro: SERVER_PORT=8081)
 curl -s localhost:8080/actuator/health     # {"groups":["liveness","readiness"],"status":"UP"}
 ```
@@ -79,7 +81,8 @@ curl -s localhost:8080/actuator/health     # {"groups":["liveness","readiness"],
 Son públicos `/error`, `/actuator/health` y todas sus subrutas (entre ellas liveness y readiness, para las probes) y
 `POST /api/auth/login`; todo lo demás (resto de actuator, Swagger, `/v3/api-docs`, `/api/**`) pide
 `Authorization: Bearer <JWT>` y sin él responde 401 (P-006, P-023, P-024). Login, token, contrato para los clientes y
-cómo dar de alta un operador en desarrollo: `docs/autenticacion.md`.
+cómo dar de alta un operador en desarrollo: `docs/autenticacion.md`. Como `/v3/api-docs` pide JWT, el spec para los
+clientes no sale de ese endpoint sino del archivo commiteado `backend/openapi.json` (P-016).
 
 Los tests de integración importan `TestcontainersConfiguration` (`@Import`), que levanta con Docker su propio
 PostgreSQL (no usa el de compose), compartido por toda la corrida con `@ServiceConnection`. Las migraciones Flyway van
@@ -113,11 +116,18 @@ npm run lint                             # ESLint (el hook ya corre eslint --fix
 npm test                                 # Vitest con jsdom, una corrida
 npx vitest run src/app/App.test.tsx      # un archivo puntual
 npm run build                            # tsc -b y vite build a dist/
+npm run generate:api                     # regenera src/api desde ../backend/openapi.json (no se edita a mano)
 ```
 
+Al cambiar la API: `./mvnw test -Dtest=OpenApiSpecTest` en `backend/` (la primera corrida falla a propósito al
+regenerar `backend/openapi.json`; la segunda tiene que pasar), después `npm run generate:api` en `web/`, y se
+commitean los dos (`backend/openapi.json` y `web/src/api`; P-016 y P-017).
+
 CI: `.github/workflows/backend.yml` corre `./mvnw verify` en push a `main` y en todo PR que toque `backend/`
-(cualquier base, también apilados); `.github/workflows/web.yml` hace lo mismo para `web/` con `npm ci`, lint, tests y
-build. No hay checks requeridos (P-012): mirar que el PR esté en verde antes de mergear.
+(cualquier base, también apilados), que incluye `OpenApiSpecTest`: un `openapi.json` desfasado lo hace fallar;
+`.github/workflows/web.yml` hace lo mismo para `web/` con `npm ci`, lint, tests y build. `web.yml` también corre con
+cambios en `backend/openapi.json`, y antes del lint regenera el cliente y falla si `src/api` no está al día. No hay checks
+requeridos (P-012): mirar que el PR esté en verde antes de mergear.
 
 ## Glosario (dominio en español → código en inglés)
 
