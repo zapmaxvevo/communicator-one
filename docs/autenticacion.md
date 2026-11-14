@@ -29,7 +29,7 @@ excepciones, que son públicas porque las traduce el handler del paquete raíz:
 | `Operator` | Entidad de la tabla `operators`, con `@TenantId organizationId` (`Operator.java:25-27`). `Operator.register(email, name, role, rawPassword, encoder)` valida con `Assert` que no falte nada (`IllegalArgumentException`), normaliza el email, guarda el hash y arranca `AWAY` (`Operator.java:44-59`). `acceptsPassword` compara contra el hash (`Operator.java:65-67`). |
 | `OperatorRole`, `Availability` | Enums `OPERATOR`/`SUPERVISOR` y `ONLINE`/`AWAY`/`ON_LEAVE`, guardados por nombre (`@Enumerated(STRING)`, `Operator.java:35-39`). |
 | `OperatorRepository` | `JpaRepository` con `findByEmail`, filtrado por organización como toda consulta derivada. |
-| `OperatorEmailDirectory` | La única consulta que cruza organizaciones: dado un email, devuelve solo el `organization_id` (`OperatorEmailDirectory.java:17-21`). |
+| `OperatorEmailDirectory` | La consulta del login que cruza organizaciones (una de las tres del sistema, `docs/multi-tenant.md`): dado un email, devuelve solo el `organization_id` (`OperatorEmailDirectory.java:17-21`). |
 | `OperatorAuthentication` | Caso de uso: `signIn(email, password)` y `currentOperator(principal)` (`OperatorAuthentication.java:34-49`). |
 | `OperatorTokens` | Emite el JWT (`issueFor`, `OperatorTokens.java:33-45`) y convierte un JWT ya validado en la `Authentication` con `AuthenticatedOperator` (`convert`, mapeo directo de los claims, `OperatorTokens.java:47-52`). |
 | `AuthenticatedOperator` | `record (operatorId, organizationId)` que implementa `OrganizationMember` y `AuthenticatedPrincipal`; `getName()` devuelve el id del operador, así que `Authentication.getName()` también (`AuthenticatedOperator.java:7-13`). |
@@ -146,8 +146,9 @@ Sin usuario autenticado no hay organización activa y el resolver devuelve el ce
    (`AuthenticationController.java:38-40`), así que acá en la práctica solo cambian las mayúsculas. Un email de solo
    espacios queda vacío y `@NotBlank` lo rechaza con 400.
 2. Busca la organización del email con `OperatorEmailDirectory.organizationOf` (`OperatorEmailDirectory.java:17-21`).
-   Es la única consulta del sistema que cruza organizaciones a propósito (P-022), va por `JdbcTemplate` y devuelve solo
-   el `organization_id`: ni el hash ni otros datos del operador.
+   Es una de las tres consultas del sistema que cruzan organizaciones a propósito (P-022; las otras son la del job de
+   cierre de oportunidades, P-037, y la de la cuenta de canal de un webhook, P-044; ver `docs/multi-tenant.md`). Va por
+   `JdbcTemplate` y devuelve solo el `organization_id`: ni el hash ni otros datos del operador.
 3. Con esa organización abre un ámbito `currentOrganization.callAs(organizationId, () -> operators.findByEmail(email))`
    (`OperatorAuthentication.java:60-64`) y carga el operador con la lectura filtrada normal. `signIn` no es
    `@Transactional` justamente porque `callAs` rechaza abrirse con una transacción en curso.

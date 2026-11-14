@@ -368,10 +368,10 @@ defecto). Detalle y alternativas en P-037.
    SELECT DISTINCT organization_id FROM opportunities WHERE status = 'OPEN' ORDER BY organization_id
    ```
 
-   Es la segunda consulta que cruza organizaciones, después de la del login (P-022), y como aquella solo devuelve ids
-   (`docs/multi-tenant.md`). Corre fuera de transacción. El índice parcial de V5 sirve a esta consulta y a la de cada
-   organización: las dos llevan `status = 'OPEN'` literal, la misma condición del índice, así que el planificador
-   puede usarlo.
+   Es una de las tres consultas que cruzan organizaciones (con la del login, P-022, y la de la cuenta de canal de un
+   webhook, P-044), y como ellas solo devuelve ids (`docs/multi-tenant.md`). Corre fuera de transacción. El índice
+   parcial de V5 sirve a esta consulta y a la de cada organización: las dos llevan `status = 'OPEN'` literal, la misma
+   condición del índice, así que el planificador puede usarlo.
 2. **Por cada organización**, en orden, `currentOrganization.runAs(organizationId, closing::closeInactiveOpportunities)`
    (`OpportunityClosingJob.java:41`): el ámbito se abre fuera de la transacción y la transacción adentro, como pide el
    patrón de procesos sin usuario (`.claude/rules/java.md`).

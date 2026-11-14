@@ -410,6 +410,64 @@ class TimelineTest {
     }
 
     @Test
+    void messageCannotPointToAChannelAccountOfAnotherOrganization(CapturedOutput output) {
+        // Given
+        var acme = fixture.organization("Acme");
+        var globex = fixture.organization("Globex");
+        var acmeConversation = fixture.conversation(acme);
+        var globexChannelAccount = fixture.channelAccount(globex);
+        var externalId = fixture.externalId();
+
+        // When
+        var rejection = catchThrowable(() -> receiveIn(acme, acmeConversation.onChannelAccount(globexChannelAccount)
+                .received(externalId, "Hola", SENT_BY_THE_CUSTOMER_AT)));
+
+        // Then
+        assertThat(rejection).isInstanceOf(DataIntegrityViolationException.class);
+        assertThat(fixture.messagesOf(acme)).isEmpty();
+        assertThat(fixture.messagesOf(globex)).isEmpty();
+        assertThat(fixture.messagesInAnyOrganizationWithExternalId(externalId)).isZero();
+        assertThat(output.getAll()).contains("messages_channel_account_id_organization_id_channel_fkey");
+    }
+
+    @Test
+    void messageCannotPointToAnUnknownChannelAccount(CapturedOutput output) {
+        // Given
+        var acme = fixture.organization("Acme");
+        var conversation = fixture.conversation(acme);
+        var externalId = fixture.externalId();
+
+        // When
+        var rejection = catchThrowable(() -> receiveIn(acme, conversation.onChannelAccount(UUID.randomUUID())
+                .received(externalId, "Hola", SENT_BY_THE_CUSTOMER_AT)));
+
+        // Then
+        assertThat(rejection).isInstanceOf(DataIntegrityViolationException.class);
+        assertThat(fixture.messagesOf(acme)).isEmpty();
+        assertThat(fixture.messagesInAnyOrganizationWithExternalId(externalId)).isZero();
+        assertThat(output.getAll()).contains("messages_channel_account_id_organization_id_channel_fkey");
+    }
+
+    @Test
+    void messageOnAChannelOtherThanItsAccountTypeIsRejected(CapturedOutput output) {
+        // Given
+        var acme = fixture.organization("Acme");
+        var telegramAccount = fixture.channelAccount(acme, ChannelType.TELEGRAM);
+        var conversation = fixture.conversation(acme).onChannelAccount(telegramAccount);
+        var externalId = fixture.externalId();
+
+        // When
+        var rejection = catchThrowable(() -> receiveIn(acme,
+                conversation.received(externalId, "Hola", SENT_BY_THE_CUSTOMER_AT)));
+
+        // Then
+        assertThat(rejection).isInstanceOf(DataIntegrityViolationException.class);
+        assertThat(fixture.messagesOf(acme)).isEmpty();
+        assertThat(fixture.messagesInAnyOrganizationWithExternalId(externalId)).isZero();
+        assertThat(output.getAll()).contains("messages_channel_account_id_organization_id_channel_fkey");
+    }
+
+    @Test
     void messageCannotBeRecordedWithoutOrganization() {
         // Given
         var acme = fixture.organization("Acme");

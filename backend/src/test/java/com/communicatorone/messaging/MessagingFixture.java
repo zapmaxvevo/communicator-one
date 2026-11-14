@@ -59,7 +59,17 @@ class MessagingFixture {
     }
 
     UUID channelAccount(UUID organizationId) {
-        return UUID.randomUUID();
+        return channelAccount(organizationId, ChannelType.WHATSAPP);
+    }
+
+    UUID channelAccount(UUID organizationId, ChannelType channelType) {
+        var id = UUID.randomUUID();
+        jdbcTemplate.update("""
+                INSERT INTO channel_accounts (id, organization_id, channel_type, external_account_id, display_name,
+                    allows_outbound)
+                VALUES (?, ?, ?, ?, 'Test account', true)
+                """, id, organizationId, channelType.name(), "account-" + id);
+        return id;
     }
 
     Conversation conversation(UUID organizationId) {

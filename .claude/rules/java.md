@@ -80,12 +80,14 @@ y local sobre un enum propio del módulo está bien; lo que se evita es repartir
 - La organización activa la da `CurrentOrganization` (módulo `organizations`): el ámbito explícito de `runAs`/`callAs`
   o, si no hay, el principal autenticado que implementa `OrganizationMember`. Sin ninguno de los dos, las lecturas
   vuelven vacías y las escrituras fallan.
-- SQL nativo y `JdbcTemplate` **no** pasan por `@TenantId`: filtran por `organization_id` a mano, siempre. Hay dos
-  excepciones, y las dos devuelven solo ids de organización: `OperatorEmailDirectory` (módulo `operators`, P-022)
+- SQL nativo y `JdbcTemplate` **no** pasan por `@TenantId`: filtran por `organization_id` a mano, siempre. Hay tres
+  excepciones, y las tres devuelven solo ids de organización: `OperatorEmailDirectory` (módulo `operators`, P-022)
   busca por email sin filtrar organización porque el login todavía no tiene una, y el operador se carga después con
   `callAs` y la lectura filtrada (`docs/autenticacion.md`); `OpportunityClosingJob` (módulo `opportunities`, P-037)
   lista las organizaciones con oportunidades abiertas y procesa cada una con `runAs` y lecturas filtradas
-  (`docs/oportunidades.md`). Otra consulta que cruce organizaciones se decide en su tarea y se anota como provisoria.
+  (`docs/oportunidades.md`); `ChannelAccountDirectory` (módulo `channels`, P-044) busca la organización de la cuenta
+  de canal de un webhook por tipo + id del proveedor, y la cuenta se carga después con `callAs` y la lectura filtrada
+  (`docs/canales.md`). Otra consulta que cruce organizaciones se decide en su tarea y se anota como provisoria.
 - Procesos sin usuario (webhooks, jobs, listeners) llaman a `currentOrganization.runAs(organizationId, ...)` **fuera**
   de la transacción, con el `@Transactional` adentro: la organización se fija al abrir la sesión, y `runAs` lanza
   `IllegalStateException` si hay sincronización de transacción activa (una transacción o un ámbito `SUPPORTS`) o si ya
