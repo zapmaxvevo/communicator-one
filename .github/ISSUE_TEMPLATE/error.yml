@@ -1,0 +1,20 @@
+name: Error
+description: Algo que no funciona como debería
+labels: ["bug"]
+body:
+  - type: textarea
+    attributes:
+      label: Qué pasa
+      description: Lo que se observa, con el mensaje de error o la salida exacta si la hay.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Qué debería pasar
+      description: El comportamiento esperado y la decisión o regla que lo justifica, si existe.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Cómo reproducirlo
+      description: Pasos mínimos o datos de entrada (payload de webhook, request a la API).

@@ -1,0 +1,67 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/issues.py\" prs-abiertos --hook",
+            "statusMessage": "PRs abiertos"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/issues.py\" limpiar-worktrees --hacer --hook >/dev/null 2>&1 || true",
+            "statusMessage": "limpiando worktrees mergeados o quietos"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "fp=$(python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get(\"tool_response\",{}).get(\"filePath\") or d.get(\"tool_input\",{}).get(\"file_path\") or \"\")'); case \"$fp\" in */web/src/*.ts|*/web/src/*.tsx) web=\"${fp%%/web/src/*}/web\"; (cd \"$web\" && npx --no-install eslint --fix \"$fp\"); ;; esac 2>/dev/null || true",
+            "statusMessage": "eslint --fix sobre el archivo de web/ modificado"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "input=$(cat); cmd=$(printf '%s' \"$input\" | python3 -c 'import json,sys; print(json.load(sys.stdin).get(\"tool_input\",{}).get(\"command\",\"\"))'); case \"$cmd\" in *\"gh pr merge\"*) python3 \"$CLAUDE_PROJECT_DIR/scripts/issues.py\" cerrar-padres; printf '%s' \"$input\" | python3 \"$CLAUDE_PROJECT_DIR/scripts/issues.py\" limpiar-worktrees --hacer --hook ;; esac; true",
+            "statusMessage": "cerrando padres y limpiando worktrees tras el merge"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/run_relevant_tests.py\"",
+            "timeout": 600,
+            "statusMessage": "baseline de tests de lo que se va a tocar"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/run_relevant_tests.py\"",
+            "timeout": 600,
+            "statusMessage": "corriendo tests finales de lo tocado"
+          }
+        ]
+      }
+    ]
+  }
+}
