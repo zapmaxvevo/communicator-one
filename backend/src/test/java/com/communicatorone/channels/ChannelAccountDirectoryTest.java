@@ -8,6 +8,7 @@ import com.communicatorone.channels.ChannelsFixture.RegisteredAccount;
 import com.communicatorone.messaging.ChannelType;
 import com.communicatorone.organizations.CurrentOrganization;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -55,10 +56,8 @@ class ChannelAccountDirectoryTest {
         var resolvedForGlobex = resolve(ChannelType.WHATSAPP, globexExternalId);
 
         // Then
-        assertThat(resolvedForAcme)
-                .contains(new RegisteredAccount(acmeAccount.id(), acme, ChannelType.WHATSAPP, true));
-        assertThat(resolvedForGlobex)
-                .contains(new RegisteredAccount(globexAccount.id(), globex, ChannelType.WHATSAPP, false));
+        assertThat(resolvedForAcme).contains(acmeAccount);
+        assertThat(resolvedForGlobex).contains(globexAccount);
     }
 
     @Test
@@ -89,10 +88,8 @@ class ChannelAccountDirectoryTest {
         var resolvedOnTelegram = resolve(ChannelType.TELEGRAM, externalId);
 
         // Then
-        assertThat(resolvedOnWhatsapp)
-                .contains(new RegisteredAccount(acmeWhatsapp.id(), acme, ChannelType.WHATSAPP, true));
-        assertThat(resolvedOnTelegram)
-                .contains(new RegisteredAccount(globexTelegram.id(), globex, ChannelType.TELEGRAM, true));
+        assertThat(resolvedOnWhatsapp).contains(acmeWhatsapp);
+        assertThat(resolvedOnTelegram).contains(globexTelegram);
     }
 
     @Test
@@ -122,16 +119,10 @@ class ChannelAccountDirectoryTest {
         var acmeAccount = fixture.account(acme, ChannelType.WHATSAPP, externalId, true);
 
         // When
-        var byIdFromGlobex = currentOrganization.callAs(globex,
-                () -> accounts.findById(acmeAccount.id()).map(RegisteredAccount::of));
-        var byExternalIdFromGlobex = currentOrganization.callAs(globex,
-                () -> accounts.findByChannelTypeAndExternalAccountId(ChannelType.WHATSAPP, externalId)
-                        .map(RegisteredAccount::of));
-        var byIdFromAcme = currentOrganization.callAs(acme,
-                () -> accounts.findById(acmeAccount.id()).map(RegisteredAccount::of));
-        var byExternalIdFromAcme = currentOrganization.callAs(acme,
-                () -> accounts.findByChannelTypeAndExternalAccountId(ChannelType.WHATSAPP, externalId)
-                        .map(RegisteredAccount::of));
+        var byIdFromGlobex = findById(globex, acmeAccount.id());
+        var byExternalIdFromGlobex = findByExternalId(globex, externalId);
+        var byIdFromAcme = findById(acme, acmeAccount.id());
+        var byExternalIdFromAcme = findByExternalId(acme, externalId);
 
         // Then
         assertThat(byIdFromGlobex).isEmpty();
@@ -168,7 +159,7 @@ class ChannelAccountDirectoryTest {
         var resolved = currentOrganization.callAs(globex, () -> resolve(ChannelType.WHATSAPP, externalId));
 
         // Then
-        assertThat(resolved).contains(new RegisteredAccount(acmeAccount.id(), acme, ChannelType.WHATSAPP, true));
+        assertThat(resolved).contains(acmeAccount);
     }
 
     @ParameterizedTest(name = "{0}")
@@ -191,5 +182,15 @@ class ChannelAccountDirectoryTest {
 
     private Optional<RegisteredAccount> resolve(ChannelType channelType, String externalAccountId) {
         return directory.resolve(channelType, externalAccountId).map(RegisteredAccount::of);
+    }
+
+    private Optional<RegisteredAccount> findById(UUID organizationId, UUID id) {
+        return currentOrganization.callAs(organizationId, () -> accounts.findById(id).map(RegisteredAccount::of));
+    }
+
+    private Optional<RegisteredAccount> findByExternalId(UUID organizationId, String externalId) {
+        return currentOrganization.callAs(organizationId,
+                () -> accounts.findByChannelTypeAndExternalAccountId(ChannelType.WHATSAPP, externalId)
+                        .map(RegisteredAccount::of));
     }
 }
