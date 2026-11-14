@@ -15,5 +15,7 @@ interface MessageRepository extends JpaRepository<Message, UUID> {
             @Param("externalId") String externalId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    Optional<Message> findByChannelAccountIdAndExternalId(UUID channelAccountId, String externalId);
+    @Query("select m from Message m where m.channelAccountId = :channelAccountId and m.externalId = :externalId")
+    Optional<Message> lockByChannelAccountIdAndExternalId(@Param("channelAccountId") UUID channelAccountId,
+            @Param("externalId") String externalId);
 }

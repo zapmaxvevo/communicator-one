@@ -37,13 +37,14 @@ public class Timeline {
     public StatusUpdateOutcome applyStatus(UUID channelAccountId, String externalId, MessageStatus status) {
         requireProviderKey(channelAccountId, externalId);
         Objects.requireNonNull(status, "status");
-        return messages.findByChannelAccountIdAndExternalId(channelAccountId, externalId)
+        return messages.lockByChannelAccountIdAndExternalId(channelAccountId, externalId)
                 .map(message -> message.advanceTo(status)
                         ? StatusUpdateOutcome.ADVANCED
                         : StatusUpdateOutcome.UNCHANGED)
                 .orElse(StatusUpdateOutcome.UNKNOWN_MESSAGE);
     }
 
+    @Transactional(readOnly = true)
     public boolean isRecorded(UUID channelAccountId, String externalId) {
         requireProviderKey(channelAccountId, externalId);
         return messages.findIdByChannelAccountIdAndExternalId(channelAccountId, externalId).isPresent();
