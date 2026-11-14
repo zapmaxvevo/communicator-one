@@ -43,6 +43,7 @@ jobs:
           npm run generate:api
           if [ -n "$(git status --porcelain -- src/api)" ]; then
             git status --porcelain -- src/api
+            git add -N src/api
             git diff -- src/api
             echo "::error::web/src/api is out of date: run npm run generate:api and commit the result"
             exit 1

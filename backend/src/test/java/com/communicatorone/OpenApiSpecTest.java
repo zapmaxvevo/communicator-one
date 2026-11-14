@@ -21,8 +21,9 @@ import org.springframework.web.context.WebApplicationContext;
 @Import(TestcontainersConfiguration.class)
 class OpenApiSpecTest {
 
-    private static final Path COMMITTED_SPEC = Path.of("openapi.json");
-    private static final String OUT_OF_DATE_MESSAGE = "backend/openapi.json was out of date and has been regenerated: "
+    private static final Path COMMITTED_SPEC = Path.of(System.getProperty("basedir", ""), "openapi.json")
+            .toAbsolutePath();
+    private static final String OUT_OF_DATE_MESSAGE = COMMITTED_SPEC + " was out of date and has been regenerated: "
             + "review and commit it, then run npm run generate:api in web/";
 
     private final MockMvcTester mvc;
@@ -46,7 +47,7 @@ class OpenApiSpecTest {
         // Then
         assertThat(result).hasStatusOk();
         if (!servedSpec.equals(committedSpec)) {
-            Files.writeString(COMMITTED_SPEC, servedSpec);
+            Files.writeString(COMMITTED_SPEC, servedSpec + "\n");
             fail(OUT_OF_DATE_MESSAGE);
         }
     }
