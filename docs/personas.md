@@ -16,11 +16,12 @@ organización activa ya hay una persona con esa identidad, devuelve su id; si no
 identidad y devuelve el id nuevo (D-003). Antes de buscar, la identidad ya está normalizada (teléfono a E.164, email en
 minúsculas), así que «+54 9 11 5555-0101» y «+5491155550101» son la misma persona.
 
-Se va a activar con cada mensaje entrante: el flujo entrante (#10) resuelve la persona del remitente antes de guardar
-el mensaje (y antes de registrar la actividad en su oportunidad). Hoy nadie la llama todavía fuera de los tests.
+La llama el pipeline entrante (`InboundPipeline`, #10, `docs/canales.md`) con cada mensaje nuevo: resuelve la persona
+del remitente antes de registrar la actividad en su oportunidad y de guardar el mensaje. Como el pipeline todavía no
+tiene endpoint (P-049), hoy solo se ejercita desde los tests.
 
-Fuera de #6 (P-030): nombre de la persona, endpoints REST, agregar una segunda identidad a una persona existente y
-fusión de duplicados.
+Fuera de #6 (P-030): nombre de la persona (pasa a #11, el primer adaptador que lo trae; P-030 ajustada en #10),
+endpoints REST, agregar una segunda identidad a una persona existente y fusión de duplicados.
 
 ## Piezas
 
@@ -81,28 +82,30 @@ Quien llama a `resolveOrCreate`:
 3. **Construye la `ContactIdentity` antes**, y atrapa `InvalidContactIdentityException` si el dato que trae el proveedor
    no es válido.
 
-Orden para el flujo entrante (#10): tres transacciones de escritura, una por paso (más la de solo lectura de
-`isRecorded`). La persona se confirma en la suya **antes** de la oportunidad (`OpportunityTracker.recordActivity`, con
-su propia transacción; ver `docs/oportunidades.md`) y del mensaje (`Timeline.recordReceived`, también con la suya; ver
-`docs/mensajes.md`). El mensaje duplicado se descarta con `Timeline.isRecorded` antes de `recordActivity`, para que un
-reenvío del proveedor no cuente como actividad.
+Orden en el flujo entrante, como quedó en `InboundPipeline.accept` (#10, `InboundPipeline.java:70-82`; detalle en
+`docs/canales.md`): dentro del `runAs` de la organización de la cuenta de canal, primero `Timeline.isRecorded` (solo
+lectura), para que un reenvío del proveedor no cree la persona ni cuente como actividad, y después tres transacciones
+de escritura, una por paso. La persona se confirma en la suya **antes** de la oportunidad
+(`OpportunityTracker.recordActivity`, con su propia transacción; ver `docs/oportunidades.md`) y del mensaje
+(`Timeline.recordReceived`, también con la suya; ver `docs/mensajes.md`). La identidad es el `sender` del
+`InboundMessage`, que el adaptador ya construyó y normalizó: si el dato del proveedor es inválido, el adaptador
+rechaza el payload entero con `InvalidWebhookPayloadException` antes de que se escriba nada.
 
 ```java
-currentOrganization.callAs(organizationId, () -> {
-    var personId = personDirectory.resolveOrCreate(identity);                     // tx 1
-    if (timeline.isRecorded(channelAccountId, externalId)) {                      // solo lectura
-        return null;                                                              // reenvío: no cuenta como actividad
-    }
-    var opportunityId = opportunityTracker.recordActivity(personId, source);      // tx 2
-    var recorded = timeline.recordReceived(new ReceivedMessage(personId, opportunityId, channelAccountId,
-            channel, externalId, content, occurredAt));                           // tx 3
-    // #10 publica «mensaje recibido» solo si !recorded.duplicate()
-    return recorded;
-});
+if (timeline.isRecorded(account.id(), inbound.externalId())) {                    // solo lectura
+    return;                                                       // reenvío: sin persona, actividad ni evento
+}
+var personId = people.resolveOrCreate(inbound.sender());                          // tx 1
+var opportunityId = opportunities.recordActivity(personId, account.channelType().name());   // tx 2
+var recorded = timeline.recordReceived(new ReceivedMessage(personId, opportunityId, account.id(),
+        account.channelType(), inbound.externalId(), inbound.content(), inbound.occurredAt()));   // tx 3
+if (!recorded.duplicate()) {
+    events.publishEvent(new MessageReceived(...));
+}
 ```
 
-`isRecorded` no es autoritativo (dos copias en paralelo pueden pasarlo las dos); lo autoritativo es
-`RecordedMessage.duplicate`.
+`isRecorded` no es autoritativo (dos copias en paralelo pueden pasarlo las dos y las dos resuelven la misma persona,
+P-029); lo autoritativo es `RecordedMessage.duplicate`.
 
 No se envuelve todo el flujo en un `@Transactional`: `resolveOrCreate` y `recordActivity` lo rechazarían. Si lo que
 sigue falla, la persona ya creada queda (sin mensajes), y el reintento del webhook la encuentra en vez de crear otra.

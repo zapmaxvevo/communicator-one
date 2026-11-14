@@ -81,6 +81,12 @@ devuelve records; nunca recibe la entidad `Person`, que es interna del módulo `
 6. Si la oportunidad es nueva, se asigna (estrategia de reparto) y arranca el temporizador de atención.
 7. Se notifica a los clientes conectados por WebSocket.
 
+En el código (`backend/src/main/java/com/communicatorone/channels/InboundPipeline.java`, desde #10) los pasos 1 a 5
+los hace `InboundPipeline.receive`, que además aplica los reportes de estado; para los pasos 6 y 7, al guardar un
+mensaje nuevo publica el evento `MessageReceived` (entrega como mucho una vez: lo que necesite garantía, como el reparto
+de #13 o el temporizador de #14, va a colgar de un evento de `opportunities`, P-051). Los no leídos del paso 5 llegan
+con #15. Detalle en `docs/canales.md` (P-049 a P-051).
+
 **Flujo saliente:**
 1. El operador responde desde la vista unificada.
 2. Se elige canal (el último usado o el que elija el operador) y cuenta.

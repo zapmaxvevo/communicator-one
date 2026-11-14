@@ -85,7 +85,9 @@ flowchart TD
 
 Proceso sin usuario (patrón para webhooks, jobs y listeners). El primer job que lo usa es `OpportunityClosingJob`
 (#37, `docs/oportunidades.md`): hace un `runAs` por organización y adentro llama a `InactiveOpportunityClosing`, que
-es `@Transactional`.
+es `@Transactional`. El primer webhook es `InboundPipeline` (#10, `docs/canales.md`): un `runAs` por mensaje o estado,
+con la organización de la cuenta de canal, y adentro los servicios de `people`, `opportunities` y `messaging`, cada uno
+con su transacción.
 
 ```mermaid
 sequenceDiagram
@@ -120,12 +122,22 @@ sequenceDiagram
      (`organizationCannotBeSwitchedWhileASessionIsOpen`);
 3. liga la organización a un `ScopedValue<UUID>` mientras dura la acción.
 
-Por eso el `runAs` va **afuera** y el `@Transactional` **adentro**. Un `@ApplicationModuleListener` ya corre en una
-transacción `REQUIRES_NEW`, así que no puede hacer `runAs`: el listener que toca datos de una organización no lleva
-transacción propia, hace `runAs(event.organizationId(), ...)` y llama a un servicio `@Transactional`. Tampoco sirve un
-`@TransactionalEventListener(phase = AFTER_COMMIT)` síncrono: corre con la sincronización todavía activa y el guard
-lanza `IllegalStateException`. El listener tiene que ser `@Async` + `@TransactionalEventListener`, sin
-`@Transactional`, y eso requiere `@EnableAsync`, que la app todavía no tiene.
+Por eso el `runAs` va **afuera** y el `@Transactional` **adentro**. Para los listeners de eventos hay una sola
+convención (`.claude/rules/java.md`, P-051): `@Async @TransactionalEventListener(fallbackExecution = true)`, sin
+`@Transactional`; el listener hace `runAs(event.organizationId(), ...)` y llama a un servicio `@Transactional`. Corre
+después del commit si el evento se publicó dentro de una transacción, y en el momento si se publicó fuera (como
+`MessageReceived`, que publica el pipeline entrante después de la transacción del mensaje; `docs/canales.md`). Lo que
+no sirve:
+
+- `@ApplicationModuleListener`: ya corre en una transacción `REQUIRES_NEW`, así que no puede hacer `runAs`.
+- `@TransactionalEventListener` síncrono: en `AFTER_COMMIT` corre con la sincronización todavía activa y el guard
+  lanza `IllegalStateException`.
+- `@TransactionalEventListener` sin `fallbackExecution = true`: no se dispara con un evento publicado fuera de una
+  transacción.
+
+Hace falta `@EnableAsync`, que la app todavía no tiene (#10 no la agrega: la app todavía no tiene listeners). Sin ella,
+`@Async` no hace nada: un evento publicado dentro de una transacción correría el listener en `AFTER_COMMIT` síncrono (el
+guard lanza) y uno publicado fuera lo correría en el hilo del webhook.
 
 La app corre con `spring.jpa.open-in-view: false` (`backend/src/main/resources/application.yml`). Con OSIV, el
 `EntityManager` se abriría al empezar el request con la organización del usuario y quedaría ligado al hilo; un `runAs`
@@ -170,8 +182,8 @@ ids de organización:
   (`docs/oportunidades.md`).
 - **La cuenta de canal de un webhook** (#42, P-044): `ChannelAccountDirectory.resolve` busca con `JdbcTemplate`
   (`SELECT organization_id FROM channel_accounts WHERE channel_type = ? AND external_account_id = ?`) y carga la cuenta
-  con `callAs` y la consulta derivada filtrada. El pipeline entrante (#10) la llama fuera de transacción y después abre
-  `runAs(account.organizationId(), ...)` (`docs/canales.md`).
+  con `callAs` y la consulta derivada filtrada. El pipeline entrante (`InboundPipeline`, #10) la llama fuera de
+  transacción y después abre `runAs(account.organizationId(), ...)` (`docs/canales.md`).
 
 ## Ejemplos
 
