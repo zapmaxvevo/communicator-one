@@ -28,7 +28,7 @@ Módulo `organizations` (`backend/src/main/java/com/communicatorone/organization
 
 | Clase | Visibilidad | Qué hace |
 |---|---|---|
-| `CurrentOrganization` | pública (API del módulo) | `runAs(UUID, Runnable)` y `callAs(UUID, Supplier<T>)` abren el ámbito de una organización (`CurrentOrganization.java:16`, `:20`); `resolve()` da la organización activa (`:24`). |
+| `CurrentOrganization` | pública (API del módulo) | `runAs(UUID, Runnable)` y `callAs(UUID, Supplier<T>)` abren el ámbito de una organización (`CurrentOrganization.java:17`, `:24`); `resolve()` da la organización activa (`:32`). |
 | `OrganizationMember` | pública (API del módulo) | Contrato del principal autenticado: `UUID organizationId()` (`OrganizationMember.java:7`). |
 | `OrganizationTenantResolver` | package-private | `CurrentTenantIdentifierResolver<UUID>` de Hibernate y `HibernatePropertiesCustomizer` que se registra a sí mismo (`OrganizationTenantResolver.java:11`, `:33`). |
 | `Organization` | package-private | Entidad de la tabla `organizations`; `Organization.named(name)` rechaza nombres nulos o en blanco (`Organization.java:27`). No lleva `@TenantId`: es el tenant. |
@@ -95,14 +95,14 @@ sequenceDiagram
 
 ### Ámbito explícito: `runAs` / `callAs`
 
-`runAs` y `callAs` pasan por `scopeOf` (`CurrentOrganization.java:31`), que:
+`runAs` (`CurrentOrganization.java:17`) delega en `callAs` (`:24`), que:
 
-1. rechaza una organización nula con `NullPointerException` (`:32`), antes de correr la acción;
+1. rechaza una organización nula con `NullPointerException` (`:25`), antes de correr la acción;
 2. lanza `IllegalStateException("The organization cannot be switched inside a transaction")` si hay sincronización de
-   transacción activa (`TransactionSynchronizationManager.isSynchronizationActive()`, `:33`). Eso cubre una
+   transacción activa (`TransactionSynchronizationManager.isSynchronizationActive()`, `:26`). Eso cubre una
    transacción real y también un ámbito `SUPPORTS` sin transacción, porque la sesión, y con ella la organización, se
    fija al abrirse;
-3. liga la organización a un `ScopedValue<UUID>` (`:14`, `:36`) mientras dura la acción.
+3. liga la organización a un `ScopedValue<UUID>` (`:15`, `:29`) mientras dura la acción.
 
 Por eso el `runAs` va **afuera** y el `@Transactional` **adentro**. Un `@ApplicationModuleListener` ya corre en una
 transacción `REQUIRES_NEW`, así que no puede hacer `runAs`: el listener que toca datos de una organización no lleva
@@ -122,8 +122,8 @@ tienen que abrir su propio `runAs`.
 
 Sin ámbito explícito, `authenticatedMemberOrganization` (`CurrentOrganization.java:39`) mira el `SecurityContextHolder`:
 solo cuenta una `Authentication` con `isAuthenticated()` verdadero cuyo principal implementa `OrganizationMember`
-(`:41`). Un token sin autenticar con el mismo principal no da organización. El ámbito explícito gana sobre el usuario
-(`:25`): un usuario de Globex dentro de `runAs(acme, ...)` ve lo de Acme.
+(`:41`, `:43`). Un token sin autenticar con el mismo principal no da organización. El ámbito explícito gana sobre el
+usuario (`:33`): un usuario de Globex dentro de `runAs(acme, ...)` ve lo de Acme.
 
 Contrato para #5: después de validar el JWT, dejar en el contexto una `Authentication` autenticada cuyo principal
 implemente `OrganizationMember`.
@@ -145,7 +145,7 @@ búsquedas que tienen que cruzar organizaciones a propósito (el operador por em
 
 ## Ejemplos
 
-Ámbito explícito (`TenantIsolationTest.java:97`): se guarda sin indicar organización y queda en la del ámbito.
+Ámbito explícito (`TenantIsolationTest.java:89`): se guarda sin indicar organización y queda en la del ámbito.
 
 ```java
 var newRecord = currentOrganization.callAs(acme,
@@ -168,25 +168,25 @@ Errores:
 
 ## Tests
 
-`backend/src/test/java/com/communicatorone/organizations/TenantIsolationTest.java` (`@SpringBootTest` +
-Testcontainers, sin `@Transactional` de clase). Cada test crea dos organizaciones nuevas, Acme y Globex, con un
-registro de `IsolationProbe` cada una (`:59`), insertado por `JdbcTemplate` en `storedRecordOf` (`:235`), y limpia
-el `SecurityContextHolder` al final (`:67`).
+`backend/src/test/java/com/communicatorone/organizations/TenantIsolationTest.java` (`@SpringBootTest` con
+`RANDOM_PORT` + Testcontainers, sin `@Transactional` de clase). Cada test crea dos organizaciones nuevas, Acme y
+Globex, con un registro de `IsolationProbe` cada una (`:51`), insertado por `JdbcTemplate` en `storedRecordOf`
+(`:229`), y limpia el `SecurityContextHolder` al final (`:59`).
 
 | Test | Línea | Qué cubre |
 |---|---|---|
-| `organizationSeesOnlyItsOwnRecords` | `:73` | Con ámbito Acme, `findAll` y `count` solo ven lo de Acme. |
-| `recordOfAnotherOrganizationIsNotFoundById` | `:84` | `findById` del registro de Globex da vacío con ámbito Acme. |
-| `newRecordBelongsToTheOrganizationInScope` | `:95` | Un registro guardado sin organización queda con la del ámbito (leído por `JdbcTemplate`). |
-| `authenticatedMemberSeesOnlyTheirOrganizationRecords` | `:105` | Un usuario autenticado de Globex solo ve lo de Globex. |
-| `unauthenticatedMemberSeesNoRecords` | `:117` | Un token sin autenticar con principal de Globex no ve nada. |
-| `explicitScopeTakesPrecedenceOverAuthenticatedMember` | `:129` | Usuario de Globex dentro de `callAs(acme)` ve solo lo de Acme. |
-| `withoutOrganizationNoRecordIsVisible` | `:141` | Sin ámbito ni usuario, `findAll` vacío. |
-| `recordCannotBeStoredWithoutOrganization` | `:150` | Sin organización, `save` lanza `DataIntegrityViolationException` y no queda nada. |
-| `organizationCannotBeSwitchedInsideATransaction` | `:160` | `runAs` dentro de una transacción lanza `IllegalStateException` y no guarda. |
-| `organizationCannotBeSwitchedInsideATransactionalScopeWithoutActualTransaction` | `:172` | Lo mismo dentro de un ámbito `SUPPORTS`. |
-| `organizationIsRequiredToRunInItsScope` | `:188` | `runAs`/`callAs` con `null` lanzan `NullPointerException` sin correr la acción. |
-| `everyBusinessEntityBelongsToAnOrganization` | `:206` | Recorre el metamodelo de Hibernate y exige `@TenantId` en toda entidad de `com.communicatorone` salvo `Organization`. Cubre las entidades futuras. |
+| `organizationSeesOnlyItsOwnRecords` | `:65` | Con ámbito Acme, `findAll` y `count` solo ven lo de Acme. |
+| `recordOfAnotherOrganizationIsNotFoundById` | `:76` | `findById` del registro de Globex da vacío con ámbito Acme. |
+| `newRecordBelongsToTheOrganizationInScope` | `:87` | Un registro guardado sin organización queda con la del ámbito (leído por `JdbcTemplate`). |
+| `authenticatedMemberSeesOnlyTheirOrganizationRecords` | `:97` | Un usuario autenticado de Globex solo ve lo de Globex. |
+| `unauthenticatedMemberSeesNoRecords` | `:109` | Un token sin autenticar con principal de Globex no ve nada. |
+| `explicitScopeTakesPrecedenceOverAuthenticatedMember` | `:121` | Usuario de Globex dentro de `callAs(acme)` ve solo lo de Acme. |
+| `withoutOrganizationNoRecordIsVisible` | `:133` | Sin ámbito ni usuario, `findAll` vacío. |
+| `recordCannotBeStoredWithoutOrganization` | `:142` | Sin organización, `save` lanza `DataIntegrityViolationException` y no queda nada. |
+| `organizationCannotBeSwitchedInsideATransaction` | `:152` | `runAs` dentro de una transacción lanza `IllegalStateException` y no guarda. |
+| `organizationCannotBeSwitchedInsideATransactionalScopeWithoutActualTransaction` | `:164` | Lo mismo dentro de un ámbito `SUPPORTS`. |
+| `organizationIsRequiredToRunInItsScope` | `:180` | `runAs`/`callAs` con `null` lanzan `NullPointerException` sin correr la acción. |
+| `everyBusinessEntityBelongsToAnOrganization` | `:198` | Recorre el metamodelo de Hibernate y exige `@TenantId` en toda entidad de `com.communicatorone` salvo `Organization`. Cubre las entidades futuras. |
 
 `backend/src/test/java/com/communicatorone/organizations/OrganizationTest.java:15`
 (`organizationWithoutNameIsRejected`, sin Spring): nombre nulo, vacío o en blanco.
