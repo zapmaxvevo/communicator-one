@@ -72,7 +72,7 @@ CREATE INDEX operators_organization_id_idx ON operators (organization_id);
 La base no exige minúsculas en el email (no hay `CHECK`): lo garantiza `Operator.register`. Quien inserte por SQL tiene
 que normalizarlo él mismo.
 
-Configuración: `communicator-one.authentication.jwt-secret: ${JWT_SECRET}` sin default (`application.yml:15-17`);
+Configuración: `communicator-one.authentication.jwt-secret: ${JWT_SECRET}` sin default (`application.yml:18-20`);
 `JWT_SECRET=` en `.env.example:9-10`. Sin la variable, vacía o con menos de 32 bytes, la app no arranca: falla
 `AuthenticationProperties`. Lo mismo con `communicator-one.authentication.token-lifetime` en cero o negativo.
 

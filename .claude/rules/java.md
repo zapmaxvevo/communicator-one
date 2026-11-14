@@ -111,7 +111,11 @@ y local sobre un enum propio del módulo está bien; lo que se evita es repartir
 - Propiedades con `@ConfigurationProperties`; credenciales y URLs de proveedores por variables de entorno, listadas en
   `.env.example`. Nunca valores reales en el repo.
 - Webhooks: validar la firma del proveedor antes de procesar.
-- Logs con SLF4J. Teléfonos, emails y contenido de mensajes no van a logs de nivel `INFO` o superior.
+- Logs con SLF4J. Teléfonos, emails y contenido de mensajes no van a logs de nivel `INFO` o superior. Tampoco a
+  mensajes de excepción ni a `toString`: los value objects con datos personales muestran solo lo que no identifica
+  (como `ContactIdentity`, que imprime `ContactIdentity[PHONE]`).
+- Todo `DataSource` nuevo, armado a mano, lleva `logServerErrorDetail=false` (P-031), como el Hikari autoconfigurado
+  en `application.yml`: así pgjdbc no copia el `Detail` del servidor, con los valores en conflicto, en las excepciones.
 
 ## Estilo
 - **PROHIBIDO ESCRIBIR COMENTARIOS (incluido Javadoc) salvo que se pidan explícitamente.** Los nombres tienen que
