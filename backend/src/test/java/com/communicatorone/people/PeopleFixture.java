@@ -50,6 +50,12 @@ class PeopleFixture {
                 organizationId);
     }
 
+    void insertIdentity(UUID organizationId, UUID personId, IdentityKind kind, String normalizedValue) {
+        jdbcTemplate.update(
+                "INSERT INTO person_identities (id, organization_id, person_id, kind, value) VALUES (?, ?, ?, ?, ?)",
+                UUID.randomUUID(), organizationId, personId, kind.name(), normalizedValue);
+    }
+
     int identitiesInAnyOrganizationWithValue(String value) {
         return jdbcTemplate.queryForObject("SELECT count(*) FROM person_identities WHERE value = ?", Integer.class,
                 value);

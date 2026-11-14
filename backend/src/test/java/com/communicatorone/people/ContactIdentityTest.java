@@ -49,6 +49,16 @@ class ContactIdentityTest {
         assertRejectedWithoutRevealing(rejection, phone);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"+1 202-555-0143 x1", "+54 9 11 5555-0101 ext. 2"})
+    void phoneWithExtensionIsRejected(String phone) {
+        // When
+        var rejection = catchThrowable(() -> ContactIdentity.phone(phone));
+
+        // Then
+        assertRejectedWithoutRevealing(rejection, phone);
+    }
+
     @Test
     void emailIsNormalizedToLowercaseWithoutSurroundingSpaces() {
         // When
@@ -60,13 +70,14 @@ class ContactIdentityTest {
                 .containsExactly(IdentityKind.EMAIL, "ana.perez+ventas@acme.test");
     }
 
-    @Test
-    void emailWithoutAtSignIsRejected() {
+    @ParameterizedTest
+    @ValueSource(strings = {"ana.perez.acme.test", "@", "ana@", "@acme.test", "a@b@c", "ana perez@acme.test"})
+    void malformedEmailIsRejected(String email) {
         // When
-        var rejection = catchThrowable(() -> ContactIdentity.email("ana.perez.acme.test"));
+        var rejection = catchThrowable(() -> ContactIdentity.email(email));
 
         // Then
-        assertRejectedWithoutRevealing(rejection, "ana.perez.acme.test");
+        assertRejectedWithoutRevealing(rejection, email);
     }
 
     @ParameterizedTest

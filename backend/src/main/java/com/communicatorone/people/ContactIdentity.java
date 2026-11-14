@@ -44,7 +44,7 @@ public record ContactIdentity(IdentityKind kind, String value) {
     private static String e164(String phone) {
         try {
             var number = PHONE_NUMBERS.parse(phone, UNKNOWN_REGION);
-            if (!PHONE_NUMBERS.isPossibleNumber(number)) {
+            if (number.hasExtension() || !PHONE_NUMBERS.isPossibleNumber(number)) {
                 throw new InvalidContactIdentityException(IdentityKind.PHONE);
             }
             return PHONE_NUMBERS.format(number, PhoneNumberFormat.E164);
@@ -54,9 +54,17 @@ public record ContactIdentity(IdentityKind kind, String value) {
     }
 
     private static String lowercaseEmail(String email) {
-        if (!email.contains("@")) {
+        if (!isWellFormedEmail(email)) {
             throw new InvalidContactIdentityException(IdentityKind.EMAIL);
         }
         return email.toLowerCase(Locale.ROOT);
+    }
+
+    private static boolean isWellFormedEmail(String email) {
+        var at = email.indexOf('@');
+        return at > 0
+                && at == email.lastIndexOf('@')
+                && at < email.length() - 1
+                && email.chars().noneMatch(Character::isWhitespace);
     }
 }

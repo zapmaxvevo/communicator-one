@@ -180,6 +180,23 @@ class PersonDirectoryTest {
         assertThat(fixture.identitiesInAnyOrganizationWithValue(email)).isZero();
     }
 
+    @Test
+    void identityCannotBelongToAPersonOfAnotherOrganization() {
+        // Given
+        var acme = fixture.organization("Acme");
+        var globex = fixture.organization("Globex");
+        var globexPerson = resolveIn(globex, ContactIdentity.phone("+54 9 11 5555-0101"));
+
+        // When
+        var rejection = catchThrowable(
+                () -> fixture.insertIdentity(acme, globexPerson, IdentityKind.EMAIL, "ana.perez@acme.test"));
+
+        // Then
+        assertThat(rejection).isInstanceOf(DataIntegrityViolationException.class);
+        assertThat(fixture.identitiesOf(acme)).isEmpty();
+        assertOnlyPerson(globex, globexPerson, IdentityKind.PHONE, "+5491155550101");
+    }
+
     @ParameterizedTest
     @EnumSource(value = Propagation.class, names = {"REQUIRED", "SUPPORTS"})
     void identityCannotBeResolvedInsideAnOpenTransactionalScope(Propagation propagation) {
