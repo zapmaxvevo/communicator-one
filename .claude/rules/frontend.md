@@ -41,14 +41,13 @@ desde `web/`. Esta regla manda sobre la skill global `react-frontend-architectur
 
 ## Estilos
 - **CSS Modules**: `Componente.module.css` al lado de `Componente.tsx`, importado como `styles` (P-013).
-- Valores de color, tipografía, espacio y radio **solo con los tokens** de `shared/styles/global.css` (`--color-*`,
-  `--font-*`, `--line-height-*`, `--space-*`, `--radius-*`), nunca valores sueltos. Si falta uno, se agrega el token
-  ahí.
+- Color, tipografía, espaciado y radio **solo con los tokens definidos en `shared/styles/global.css`**, nunca con
+  valores sueltos; si falta uno, se agrega ahí.
 - `global.css` (tokens y reset mínimo) se importa una sola vez, en `main.tsx`; nada de otros estilos globales.
 
 ## Tests
 - Vitest + Testing Library, en `<Componente>.test.tsx` al lado del componente (P-014). `describe`, `it` y `expect` se
-  importan de `vitest` (sin globals).
+  importan siempre de `vitest`, aunque estén como globals: `tsc` los exige.
 - Nombre en inglés como frase de usuario, en presente: `it("shows ... when ...")`. `describe` solo cuando hay varios
   escenarios del mismo componente.
 - Given/When/Then con bloques separados por una línea en blanco, **sin comentarios**.

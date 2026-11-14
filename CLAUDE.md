@@ -38,8 +38,7 @@ subpaquete directo nuevo es un módulo más y rompe `ModularStructureTest` a pro
 
 ## Comandos
 
-Requisitos: Java 25 y Docker (para compose y Testcontainers); para la web, Node 24 (≥24.14, ver `web/.nvmrc` y
-`engines` de `web/package.json`).
+Requisitos: Java 25 y Docker (para compose y Testcontainers); para la web, Node 24 (ver `web/.nvmrc`).
 
 Entorno local, desde la raíz:
 
