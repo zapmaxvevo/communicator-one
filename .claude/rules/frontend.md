@@ -46,8 +46,9 @@ desde `web/`. Esta regla manda sobre la skill global `react-frontend-architectur
 - `global.css` (tokens y reset mínimo) se importa una sola vez, en `main.tsx`; nada de otros estilos globales.
 
 ## Tests
-- Vitest + Testing Library, en `<Componente>.test.tsx` al lado del componente (P-014). `describe`, `it` y `expect` se
-  importan siempre de `vitest`, aunque estén como globals: `tsc` los exige.
+- Vitest + Testing Library, en `<Componente>.test.tsx` al lado del componente (P-014).
+- `globals: true` en `web/vite.config.ts` está para que Testing Library haga el cleanup automático entre tests: **no se
+  saca**. Igual, `describe`, `it` y `expect` se importan de `vitest`, porque `tsc` lo exige.
 - Nombre en inglés como frase de usuario, en presente: `it("shows ... when ...")`. `describe` solo cuando hay varios
   escenarios del mismo componente.
 - Given/When/Then con bloques separados por una línea en blanco, **sin comentarios**.
