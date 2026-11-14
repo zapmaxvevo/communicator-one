@@ -14,8 +14,8 @@ Para el diff que te pasan:
   no tiene undo: hace falta una migración nueva).
 - Índices para lo que consultan los webhooks y la ventana de canal (emisor, receptor, fecha), según `docs/vision.md`.
 - Variables de entorno y propiedades nuevas o renombradas: presentes en `.env.example`, sin valores reales en el repo.
-- `docker-compose.yml` y CI: servicios, versiones de imágenes, que el workflow siga corriendo `./mvnw verify` y los
-  checks de `web/`.
+- `docker-compose.yml` y CI: servicios, versiones de imágenes, que los workflows de `.github/workflows/` sigan
+  corriendo `./mvnw verify` (backend) y los checks de `web/`.
 - Endpoints públicos nuevos (webhooks): validación de firma, sin autenticación JWT donde el proveedor no la manda,
   límites de tamaño.
 - Orden de deploy (migración antes que código), necesidad de backfill y plan de rollback.
