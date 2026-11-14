@@ -53,9 +53,8 @@ docker compose down -v      # además borra el volumen de Postgres (reset del en
 - Sin `name:` en el compose, el proyecto toma el nombre del directorio: cada worktree tiene contenedores y volumen
   propios, pero publican los mismos puertos. Hacer `docker compose down` antes de levantarlo desde otro worktree.
 - `DB_USERNAME`, `DB_PASSWORD` y `POSTGRES_DB` solo se aplican al crear el volumen en el primer `up`. Si después
-  cambian usuario o clave, la app falla al autenticar; si cambia `POSTGRES_DB` (con `DB_URL` ajustado), la base no
-  existe. En los dos casos: `docker compose down -v && docker compose up -d`. Si cambia `POSTGRES_PORT` o
-  `POSTGRES_DB`, ajustar también `DB_URL`.
+  cambian usuario o clave, la app falla al autenticar; si cambia `POSTGRES_DB`, la base no existe. En los dos casos:
+  `docker compose down -v && docker compose up -d`.
 - Spring no lee `.env`. Para correr la app con valores propios:
   `set -a && . ../.env && set +a && ./mvnw spring-boot:run` (desde `backend/`).
 
