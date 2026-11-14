@@ -13,10 +13,13 @@ tocás migraciones, `.claude/rules/flyway.md`.
 - Módulos de Spring Modulith: hablá con otro módulo por su API pública o por eventos de dominio, nunca por su paquete
   interno. `ApplicationModules.verify()` tiene que seguir pasando.
 - Transacciones: `@Transactional` en el caso de uso, no en el controller. Notificaciones (WebSocket) y efectos externos
-  después del commit (`@ApplicationModuleListener` / `@TransactionalEventListener(phase = AFTER_COMMIT)`).
+  después del commit. `@ApplicationModuleListener` directo solo para efectos que no leen ni escriben datos de una
+  organización; si el listener los toca, sigue `.claude/rules/java.md`: async, sin transacción propia,
+  `runAs(event.organizationId(), ...)` y un servicio `@Transactional`.
 - Webhooks idempotentes: unicidad por `externalId` + `ChannelAccount` en la base y duplicado tratado como éxito, no
   como error. Los estados de entrega no retroceden.
-- Multi-tenant: toda consulta de negocio filtra por `organizationId`.
+- Multi-tenant: toda entidad de negocio lleva `@TenantId` (Hibernate filtra y asigna la organización); SQL nativo y
+  `JdbcTemplate` filtran por `organization_id` a mano. Ver `.claude/rules/java.md`.
 - Tiempo por `Clock` inyectado. Configuración y credenciales por variables de entorno (agregalas a `.env.example`).
 - Corré los tests afectados hasta verde y después `./mvnw verify`. No commitees.
 

@@ -26,25 +26,27 @@ backend/openapi.json contrato OpenAPI de la API, exportado por OpenApiSpecTest (
 docker-compose.yml   PostgreSQL 18 y Redis para desarrollo local
 .env.example         variables de entorno (copiar a .env)
 web/                 React 19 + TS estricto + Vite, con ESLint y Vitest (src/{app,features,shared,api})
-docs/                visión, decisiones, equivalencias del backlog
+docs/                visión, decisiones, multi-tenant, autenticación, personas, oportunidades, equivalencias del backlog
 scripts/             issues.py (issues, subissues y estados del Project con gh)
 .github/             plantillas de issue (tarea, error) y de PR, workflows de CI
 .claude/             agentes, skills, rules y hooks de Claude Code
 ```
 
 En `backend/`, cada módulo de Spring Modulith es un subpaquete directo de `com.communicatorone` con un
-`package-info.java` anotado `@ApplicationModule`: `organizations`, `people`, `opportunities`, `messaging`, `channels`,
-`assignment`, `notifications`. La configuración transversal (como `SecurityConfiguration`) va en el paquete raíz: un
-subpaquete directo nuevo es un módulo más y rompe `ModularStructureTest` a propósito.
+`package-info.java` anotado `@ApplicationModule`. Son ocho: `organizations`, `operators`, `people`, `opportunities`,
+`messaging`, `channels`, `assignment`, `notifications`. La configuración transversal (como `SecurityConfiguration`,
+`ApiExceptionHandler`, `ClockConfiguration` y `SchedulingConfiguration`) va en el paquete raíz: un subpaquete directo
+nuevo es un módulo más y rompe `ModularStructureTest` a propósito.
 
 ## Comandos
 
-Requisitos: Java 25 y Docker (para compose y Testcontainers); para la web, Node 24 (ver `web/.nvmrc`).
+Requisitos: Java 25, Docker (para compose y Testcontainers) y `unzip` (para el wrapper de Maven: sin `unzip`,
+`mvnw` baja el tar.gz y falla la verificación contra el hash del zip); para la web, Node 24 (ver `web/.nvmrc`).
 
 Entorno local, desde la raíz:
 
 ```bash
-cp .env.example .env        # opcional: los defaults ya coinciden con compose y application.yml
+cp .env.example .env        # y completar JWT_SECRET con: openssl rand -base64 48
 docker compose up -d        # PostgreSQL 18 y Redis, publicados solo en 127.0.0.1
 docker compose ps           # estado y healthchecks
 docker compose down         # para los contenedores y conserva los datos
@@ -56,8 +58,15 @@ docker compose down -v      # además borra el volumen de Postgres (reset del en
 - `DB_USERNAME`, `DB_PASSWORD` y `POSTGRES_DB` solo se aplican al crear el volumen en el primer `up`. Si después
   cambian usuario o clave, la app falla al autenticar; si cambia `POSTGRES_DB`, la base no existe. En los dos casos:
   `docker compose down -v && docker compose up -d`.
-- Spring no lee `.env`. Para correr la app con valores propios:
-  `set -a && . ../.env && set +a && ./mvnw spring-boot:run` (desde `backend/`).
+- `JWT_SECRET` es obligatoria (sin default, P-023): sin ella, en blanco o con menos de 32 bytes, la app no arranca.
+  Las demás variables tienen defaults que coinciden con compose y `application.yml`. La opcional
+  `COMMUNICATOR_ONE_OPPORTUNITIES_CLOSING_CRON` (comentada en `.env.example`) cambia el horario del job de cierre de
+  oportunidades (cada hora por defecto); `-` lo apaga. La opcional `COMMUNICATOR_ONE_OPPORTUNITIES_CLOSING_LOCK_TIMEOUT`
+  (también comentada) cambia cuánto espera ese job por una fila bloqueada antes de saltear la organización (`10s` por
+  defecto; sin unidad son milisegundos; `0` = sin límite).
+- Spring no lee `.env`: hay que exportar sus variables antes de correr la app, desde `backend/`:
+  `set -a; . ../.env; set +a; ./mvnw spring-boot:run`. Los tests no necesitan `JWT_SECRET`
+  (`TestcontainersConfiguration` registra un secreto solo de test).
 
 Backend, desde `backend/`:
 
@@ -65,16 +74,38 @@ Backend, desde `backend/`:
 ./mvnw verify                              # suite completa
 ./mvnw test -Dtest=ModularStructureTest    # estructura de módulos, sin Docker
 ./mvnw test -Dtest=OpenApiSpecTest         # con Docker; si openapi.json quedó desfasado, lo regenera y falla
-./mvnw spring-boot:run                     # necesita el Postgres de compose; puerto 8080 (otro: SERVER_PORT=8081)
+./mvnw spring-boot:run                     # necesita el Postgres de compose y JWT_SECRET exportada; puerto 8080 (otro: SERVER_PORT=8081)
 curl -s localhost:8080/actuator/health     # {"groups":["liveness","readiness"],"status":"UP"}
 ```
 
-Solo las rutas exactas `/actuator/health` y `/error` son públicas; todo lo demás (incluidos
-`/actuator/health/liveness`, `/actuator/health/readiness`, Swagger y `/v3/api-docs`) responde 401 hasta el issue #5
-(JWT). Por eso el spec no sale de ese endpoint sino del archivo commiteado `backend/openapi.json` (P-016). Los tests
-de integración importan `TestcontainersConfiguration` (`@Import`), que levanta con Docker su propio PostgreSQL (no usa
-el de compose), compartido por toda la corrida con `@ServiceConnection`. Las migraciones Flyway van en
-`src/main/resources/db/migration` (ubicación por defecto; todavía no hay ninguna).
+Son públicos `/error`, `/actuator/health` y todas sus subrutas (entre ellas liveness y readiness, para las probes) y
+`POST /api/auth/login`; todo lo demás (resto de actuator, Swagger, `/v3/api-docs`, `/api/**`) pide
+`Authorization: Bearer <JWT>` y sin él responde 401 (P-006, P-023, P-024). Login, token, contrato para los clientes y
+cómo dar de alta un operador en desarrollo: `docs/autenticacion.md`. Como `/v3/api-docs` pide JWT, el spec para los
+clientes no sale de ese endpoint sino del archivo commiteado `backend/openapi.json` (P-016).
+
+Los tests de integración importan `TestcontainersConfiguration` (`@Import`), que levanta con Docker su propio
+PostgreSQL (no usa el de compose), compartido por toda la corrida con `@ServiceConnection`. Las migraciones Flyway van
+en `src/main/resources/db/migration` (ubicación por defecto; la primera es `V1__create_organizations.sql`). En los
+tests, Flyway también toma `src/test/resources/db/migration` del classpath, con la migración repetible de la tabla de
+`IsolationProbe`, la entidad solo de test que prueba el aislamiento (P-020): no cambiar `spring.flyway.locations` en
+los tests, porque la entidad está en todos los contextos y `ddl-auto=validate` exige su tabla. Por esa migración de
+test, todo `@SpringBootTest` importa `TestcontainersConfiguration`: sin él, el test usaría la base del compose, le
+dejaría aplicada la `R__` y la app normal fallaría al arrancar (`Validate failed`); ver `.claude/rules/tests.md`.
+
+`TestcontainersConfiguration` también desactiva el cron del job de cierre de oportunidades
+(`communicator-one.opportunities.closing-cron` = `-`), así que el job no queda programado en tests (lo verifica
+`OpportunityClosingJobTest.closingJobDoesNotRunOnItsOwnScheduleDuringTests`; el scheduling sigue activo y Spring
+Modulith Moments registra sus propias tareas), y baja su lock timeout a `2s`
+(`communicator-one.opportunities.closing-lock-timeout`). Los jobs `@Scheduled` se prueban llamando al método
+directamente.
+
+Multi-tenant (P-018): toda entidad de negocio lleva `@TenantId UUID organizationId` y Hibernate filtra y asigna la
+organización activa, que da `CurrentOrganization` (`runAs` para procesos sin usuario, o el principal autenticado que
+implementa `OrganizationMember`). Las reglas están en `.claude/rules/java.md` («Persistencia y transacciones»).
+
+El wrapper verifica Maven con `distributionSha256Sum` (`.mvn/wrapper/maven-wrapper.properties`): al cambiar
+`distributionUrl`, poner el `sha256sum` del zip nuevo, verificado contra su `.sha512` de Maven Central.
 
 Web, desde `web/`:
 
@@ -104,7 +135,7 @@ requeridos (P-012): mirar que el PR esté en verde antes de mergear.
 |---|---|
 | Organización (tenant, empresa cliente) | `Organization` |
 | Persona (permanente) | `Person` |
-| Identidad de contacto (wa_id, @ig, email…) | `ContactIdentity` |
+| Identidad de contacto (teléfono E.164, email, id del canal…) | `ContactIdentity` |
 | Oportunidad (episodio con ciclo de vida) | `Opportunity` |
 | Mensaje | `Message` |
 | Cuenta de canal (nuestro número, página, bot) | `ChannelAccount` |

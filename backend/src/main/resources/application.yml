@@ -7,7 +7,17 @@ spring:
     url: jdbc:postgresql://${DB_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:communicator_one}
     username: ${DB_USERNAME:communicator_one}
     password: ${DB_PASSWORD:communicator_one}
+    hikari:
+      data-source-properties:
+        logServerErrorDetail: false
   jpa:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+
+communicator-one:
+  authentication:
+    jwt-secret: ${JWT_SECRET}
+  opportunities:
+    closing-cron: "0 0 * * * *"
+    closing-lock-timeout: 10s

@@ -11,8 +11,11 @@ Sobre `git diff`, chequeá:
   lectura que escriben), efectos externos y WebSocket después del commit, rollback preservado, concurrencia (dos
   webhooks iguales a la vez, dos asignaciones simultáneas).
 - Idempotencia ante eventos repetidos o desordenados de proveedores; estados de entrega que no retroceden.
-- Aislamiento: ninguna consulta de negocio sin filtro por `organizationId`; nada que exponga datos de otra
-  organización por id.
+- Aislamiento: ninguna entidad de negocio sin `@TenantId`, ningún SQL nativo ni `JdbcTemplate` sin filtro por
+  `organization_id` (ver `.claude/rules/java.md`); nada que exponga datos de otra organización por id. Revisá los
+  caminos que rompen el aislamiento en silencio, según java.md: `runAs` dentro de una transacción, listeners
+  `@ApplicationModuleListener` o `AFTER_COMMIT` síncronos con datos de una organización, `@Async`/executors sin
+  `runAs`, OSIV.
 - Arquitectura: dominio sin dependencias de infraestructura, módulos de Spring Modulith sin acceso a paquetes internos
   ajenos, adaptadores detrás de su puerto.
 - Diseño: alta cohesión, Tell Don't Ask, Ley de Demeter, sin duplicar lo que ya resuelve el dominio, nombres del

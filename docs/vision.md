@@ -29,7 +29,7 @@ El canal es un detalle de transporte. Lo importante es la persona y la historia 
 ```
 Organization  (tenant: la empresa cliente)
  ├── Person                         permanente
- │    ├── ContactIdentity *         canal + id externo (wa_id, ig_user_id, email, tg_chat_id…)
+ │    ├── ContactIdentity *         tipo de dato + valor normalizado (teléfono E.164, email, id opaco del canal)
  │    ├── Message *                 UNA línea de tiempo, para siempre
  │    │    ├── channel              WHATSAPP, INSTAGRAM, MESSENGER, TELEGRAM, EMAIL, SMS, WEBCHAT…
  │    │    ├── senderType           CUSTOMER | OPERATOR | BOT | SYSTEM
@@ -48,7 +48,7 @@ Organization  (tenant: la empresa cliente)
  └── configuración                  reparto, temporizadores, horario de atención, ventanas
 ```
 
-- `ContactIdentity` permite que "Juan por WhatsApp" y "@juan por Instagram" sean la misma persona.
+- `ContactIdentity` permite que "Juan por WhatsApp" y "Juan por Instagram" sean la misma persona. Es tipo de dato + valor normalizado (teléfono E.164, email, id opaco del canal), no canal + id externo: el mismo teléfono por WhatsApp y por SMS es la misma identidad (P-027 en `docs/decisiones.md`, detalle en `docs/personas.md`).
 - `ChannelAccount` es nuestra identidad en cada canal. Un mensaje entrante se asigna a la organización según la cuenta que lo recibió.
 - `externalId` es clave: los webhooks llegan duplicados y los estados (entregado, leído) llegan aparte.
 
