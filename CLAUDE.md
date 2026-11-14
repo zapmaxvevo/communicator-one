@@ -18,18 +18,61 @@ Leer antes de trabajar:
 - **Web:** React + TypeScript + Vite.
 - **Arquitectura API primero:** toda la lógica vive en el backend. Web, celular, escritorio y terminal son clientes de la misma API (REST + OpenAPI + WebSocket).
 
-## Estructura (prevista)
+## Estructura
 
 ```
-backend/   Spring Boot (módulos: organizations, people, opportunities, messaging, channels, assignment, notifications)
-web/       React + TS + Vite
-docs/      visión, decisiones, equivalencias del backlog
-scripts/   issues.py (issues, subissues y estados del Project con gh)
-.github/   plantillas de issue (tarea, error) y de PR
-.claude/   agentes, skills, rules y hooks de Claude Code
+backend/             Spring Boot 4 + Maven wrapper, paquete raíz com.communicatorone
+docker-compose.yml   PostgreSQL 18 y Redis para desarrollo local
+.env.example         variables de entorno (copiar a .env)
+web/                 React + TS + Vite (prevista, issue #3)
+docs/                visión, decisiones, equivalencias del backlog
+scripts/             issues.py (issues, subissues y estados del Project con gh)
+.github/             plantillas de issue (tarea, error) y de PR
+.claude/             agentes, skills, rules y hooks de Claude Code
 ```
 
-Los comandos de build y test se completan en esta sección cuando se haga el scaffold (issues #1 y #3).
+En `backend/`, cada módulo de Spring Modulith es un subpaquete directo de `com.communicatorone` con un
+`package-info.java` anotado `@ApplicationModule`: `organizations`, `people`, `opportunities`, `messaging`, `channels`,
+`assignment`, `notifications`. La configuración transversal (como `SecurityConfiguration`) va en el paquete raíz: un
+subpaquete directo nuevo es un módulo más y rompe `ModularStructureTest` a propósito.
+
+## Comandos
+
+Requisitos: Java 25 y Docker (para compose y Testcontainers). Los comandos de la web llegan con el issue #3.
+
+Entorno local, desde la raíz:
+
+```bash
+cp .env.example .env        # opcional: los defaults ya coinciden con compose y application.yml
+docker compose up -d        # PostgreSQL 18 y Redis, publicados solo en 127.0.0.1
+docker compose ps           # estado y healthchecks
+docker compose down         # para los contenedores y conserva los datos
+docker compose down -v      # además borra el volumen de Postgres (reset del entorno local)
+```
+
+- Sin `name:` en el compose, el proyecto toma el nombre del directorio: cada worktree tiene contenedores y volumen
+  propios, pero publican los mismos puertos. Hacer `docker compose down` antes de levantarlo desde otro worktree.
+- `DB_USERNAME`, `DB_PASSWORD` y `POSTGRES_DB` solo se aplican al crear el volumen en el primer `up`. Si después
+  cambian usuario o clave, la app falla al autenticar; si cambia `POSTGRES_DB` (con `DB_URL` ajustado), la base no
+  existe. En los dos casos: `docker compose down -v && docker compose up -d`. Si cambia `POSTGRES_PORT` o
+  `POSTGRES_DB`, ajustar también `DB_URL`.
+- Spring no lee `.env`. Para correr la app con valores propios:
+  `set -a && . ../.env && set +a && ./mvnw spring-boot:run` (desde `backend/`).
+
+Backend, desde `backend/`:
+
+```bash
+./mvnw verify                              # suite completa (Testcontainers levanta su propio Postgres; necesita Docker, no compose)
+./mvnw test -Dtest=ModularStructureTest    # estructura de módulos, sin Docker
+./mvnw spring-boot:run                     # necesita el Postgres de compose; puerto 8080 (otro: SERVER_PORT=8081)
+curl -s localhost:8080/actuator/health     # {"groups":["liveness","readiness"],"status":"UP"}
+```
+
+Solo las rutas exactas `/actuator/health` y `/error` son públicas; todo lo demás (incluidos
+`/actuator/health/liveness`, `/actuator/health/readiness`, Swagger y `/v3/api-docs`) responde 401 hasta el issue #5
+(JWT). Los tests de integración importan `TestcontainersConfiguration` (`@Import`), que da un PostgreSQL compartido por
+toda la corrida con `@ServiceConnection`. Las migraciones Flyway van en `src/main/resources/db/migration` (ubicación
+por defecto; todavía no hay ninguna).
 
 ## Glosario (dominio en español → código en inglés)
 
