@@ -12,8 +12,8 @@ on:
       - ".github/workflows/backend.yml"
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -36,7 +36,7 @@ jobs:
 
       - run: ./mvnw -B --no-transfer-progress verify
 
-      - if: failure()
+      - if: failure() || cancelled()
         uses: actions/upload-artifact@v7
         with:
           name: test-reports
