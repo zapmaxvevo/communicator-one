@@ -34,7 +34,8 @@ saliente (#12). Como el pipeline todavía no tiene endpoint (P-049), hoy solo se
 
 Fuera de #8: la tabla `channel_accounts` y su FK desde `messages` (#42, `docs/canales.md`), el puerto de canal y el
 adaptador `SANDBOX` (#43, `docs/canales.md`), el pipeline entrante y la llamada a `recordActivity` (#10, hecho en
-`docs/canales.md`), adjuntos, plantillas y ubicación (#11, #12), la ventana de conversación y el envío (#12), la
+`docs/canales.md`), adjuntos y ubicación entrantes (#11, sin subissue todavía: el adaptador de WhatsApp de #47 solo
+toma texto e ignora el resto), plantillas (#12), la ventana de conversación y el envío (#12), la
 consulta de la línea de tiempo, REST, WebSocket y los no leídos del operador (#15), y los eventos (P-009; desde #10
 existe `MessageReceived`, que publica el pipeline entrante en `channels`, P-051).
 
@@ -88,7 +89,7 @@ boolean known = timeline.isRecorded(channelAccountId, "wamid.HBgNNTQ5MTE1NTU1MDE
 ```
 
 Pasar del payload del proveedor (por ejemplo, un `statuses[].status = "delivered"` de WhatsApp) a estos comandos es
-trabajo del adaptador de canal (puerto y sandbox en #43, WhatsApp en #11; `docs/canales.md`) y del pipeline de #10:
+trabajo del adaptador de canal (puerto y sandbox en #43, WhatsApp en #47; `docs/canales.md`) y del pipeline de #10:
 `messaging` no conoce payloads.
 
 | Operación y entrada | Salida |
@@ -528,7 +529,9 @@ Comando: `./mvnw test -Dtest='MessageTest,TimelineTest'` desde `backend/` (skill
   duplicado).
 - **`occurred_at` del proveedor sin validar**: una hora futura o muy vieja desordena la línea de tiempo.
 - **Entrante `DELIVERED` es interpretación propia**: ningún proveedor lo informa.
-- **Solo texto**: adjuntos, plantillas y ubicación llegan con #11/#12, sin `jsonb` por ahora.
+- **Solo texto**: adjuntos y ubicación entrantes son de #11 (sin subissue todavía; hasta entonces el adaptador de
+  WhatsApp de #47 ignora los mensajes que no son texto, `docs/canales.md`) y las plantillas, de #12; sin `jsonb` por
+  ahora.
 - **Índices antes que sus consultas**: el de la línea de tiempo y el de la ventana no los usa nadie hasta #15 y #12.
   #12 tiene que escribir la consulta de la ventana con `sender_type = 'CUSTOMER'` literal para que use el índice
   parcial.

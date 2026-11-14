@@ -20,7 +20,8 @@ La llama el pipeline entrante (`InboundPipeline`, #10, `docs/canales.md`) con ca
 del remitente antes de registrar la actividad en su oportunidad y de guardar el mensaje. Como el pipeline todavía no
 tiene endpoint (P-049), hoy solo se ejercita desde los tests.
 
-Fuera de #6 (P-030): nombre de la persona (pasa a #11, el primer adaptador que lo trae; P-030 ajustada en #10),
+Fuera de #6 (P-030): nombre de la persona (pasa a #48, parte de #11, que lo toma del perfil de WhatsApp; P-030
+ajustada en #10),
 endpoints REST, agregar una segunda identidad a una persona existente y fusión de duplicados.
 
 ## Piezas
@@ -60,9 +61,11 @@ Configuración: `spring.datasource.hikari.data-source-properties.logServerErrorD
 | `MESSENGER_USER` | PSID (id de Messenger por página) | Solo Messenger. |
 | `TELEGRAM_USER` | Id de usuario de Telegram | Solo Telegram. |
 
-`people` no conoce canales. Cada adaptador decide qué tipo sale de su payload: por ejemplo, el `wa_id` de WhatsApp
-(dígitos sin `+`) lo pasa como `PHONE` anteponiéndole el `+` (#11). `WEBCHAT_VISITOR` y `WHATSAPP_USER` (BSUID) se
-agregan con sus tareas.
+`people` no conoce canales. Cada adaptador decide qué tipo sale de su payload: por ejemplo, el adaptador de WhatsApp
+(#47, P-053) pasa el `wa_id` (dígitos sin `+`, el `from` del mensaje) como `PHONE` anteponiéndole el `+`; a un `wa_id`
+mexicano con el `1` móvil viejo (`521` y diez dígitos) le quita el `1`; e ignora el mensaje cuyo remitente no es un
+teléfono posible (un BSUID) hasta que exista `WHATSAPP_USER` (`docs/canales.md`, «Adaptador `WHATSAPP`»).
+`WEBCHAT_VISITOR` y `WHATSAPP_USER` (BSUID) se agregan con sus tareas.
 
 ## Contrato de uso
 
@@ -344,9 +347,13 @@ y resuelve con `callAs` (`resolveIn`). Las filas se leen con `PeopleFixture` (`J
   móviles). Son dos identidades y, por lo tanto, dos personas. Se acepta por D-003 hasta la revisión de duplicados.
 - **México**: el `1` que se anteponía a los móviles (`+52 1 55 1234 5678`) no es un número posible para libphonenumber
   9.0.43 y se rechaza con `InvalidContactIdentityException`; `+52 55 1234 5678` pasa. El adaptador que reciba el
-  formato viejo tiene que quitar el `1`. Estos dos casos no están en los tests.
+  formato viejo tiene que quitar el `1`: el de WhatsApp (#47) ya lo hace con un `wa_id` `521` + diez dígitos
+  (`WhatsAppChannelAdapter.java:36`, `:175`; lo prueba
+  `WhatsAppChannelAdapterTest.mexicanSenderWithTheOldMobilePrefixKeepsTheirE164PhoneWithoutTheOne`). Estos dos casos
+  no están en los tests de `people`.
 - **WhatsApp BSUID**: cuando WhatsApp mande el id de usuario sin teléfono, esa persona va a quedar duplicada respecto
-  de la que entró por teléfono hasta que existan `WHATSAPP_USER` y la fusión.
+  de la que entró por teléfono hasta que existan `WHATSAPP_USER` y la fusión. Mientras tanto, el adaptador de WhatsApp
+  (#47, P-053) ignora esos mensajes: por ahora no se duplica ninguna persona, pero esos mensajes no se registran.
 - **PSID/IGSID**: los ids de Messenger e Instagram son por página. La misma persona escribiendo a dos páginas de la
   organización queda como dos personas (P-027, aceptable por D-003).
 - **Log del servidor PostgreSQL**: P-031 limpia los mensajes de la app, pero el servidor sigue guardando el `DETAIL`
