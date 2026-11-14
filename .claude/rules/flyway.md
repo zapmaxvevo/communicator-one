@@ -27,3 +27,10 @@ paths:
 - Cuidado con lo que bloquea o rompe al código que sigue corriendo durante el deploy: renombres, `NOT NULL` sin
   default, borrado de columnas que la versión anterior todavía usa. En esos casos, dividir en pasos (agregar → migrar
   datos → quitar) en tareas separadas.
+- Cuando haya tablas grandes con datos productivos, un índice nuevo va con `CREATE INDEX CONCURRENTLY` en una migración
+  propia: Flyway la corre fuera de transacción (PostgreSQL no admite `CONCURRENTLY` dentro de una), y si falla deja un
+  índice `INVALID` que hay que borrar antes de reintentar. Ojo: en PostgreSQL Flyway toma por defecto un lock asesor
+  transaccional (`spring.flyway.postgresql.transactional-lock`; activado en la Flyway 12.4.0 del repo), y con él
+  `CREATE INDEX CONCURRENTLY` puede quedar colgado esperando; para esa corrida, poner
+  `spring.flyway.postgresql.transactional-lock=false` (usa un lock de sesión). Hasta entonces, `CREATE INDEX` común
+  (como V5).

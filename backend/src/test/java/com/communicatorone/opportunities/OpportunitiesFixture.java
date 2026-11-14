@@ -108,6 +108,33 @@ class OpportunitiesFixture {
         });
     }
 
+    RivalOpening rivalStartsRecordingActivity(UUID organizationId, UUID opportunityId, Instant at)
+            throws InterruptedException {
+        return rivalHoldsUncommitted(opportunityId, () -> jdbcTemplate.update(
+                "UPDATE opportunities SET last_activity_at = ? WHERE id = ? AND organization_id = ?", utc(at),
+                opportunityId, organizationId));
+    }
+
+    AutoCloseable databaseRejectsClosingOpportunitiesOf(UUID organizationId) {
+        var trigger = "reject_closing_" + organizationId.toString().replace("-", "");
+        jdbcTemplate.execute("""
+                CREATE OR REPLACE FUNCTION reject_closing_opportunities() RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN
+                    RAISE EXCEPTION 'Closing the opportunities of organization % is rejected', NEW.organization_id;
+                END;
+                $$
+                """);
+        jdbcTemplate.execute("""
+                CREATE TRIGGER %s BEFORE UPDATE ON opportunities FOR EACH ROW
+                WHEN (NEW.organization_id = '%s' AND NEW.status = 'CLOSED')
+                EXECUTE FUNCTION reject_closing_opportunities()
+                """.formatted(trigger, organizationId));
+        return () -> {
+            jdbcTemplate.execute("DROP TRIGGER " + trigger + " ON opportunities");
+            jdbcTemplate.execute("DROP FUNCTION IF EXISTS reject_closing_opportunities()");
+        };
+    }
+
     boolean anotherSessionIsWaitingToWriteOpportunities() {
         return anotherSessionIsWaitingOn("%insert into opportunities%");
     }

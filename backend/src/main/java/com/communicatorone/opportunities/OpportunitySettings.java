@@ -53,6 +53,10 @@ class OpportunitySettings {
         return lastActivityAt.plus(Duration.ofDays(inactivityDaysToClose));
     }
 
+    Instant inactivityCutoffAt(Instant now) {
+        return now.minus(Duration.ofDays(inactivityDaysToClose));
+    }
+
     boolean allowsReentryAt(Instant closedAt, Instant now) {
         return now.isBefore(closedAt.plus(Duration.ofDays(reentryWindowDays)));
     }
