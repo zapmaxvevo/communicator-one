@@ -2,6 +2,7 @@ package com.communicatorone.people;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
+import static com.communicatorone.people.PeopleFixture.TIMEOUT;
 import static org.awaitility.Awaitility.await;
 
 import com.communicatorone.MutableClock;
@@ -9,7 +10,6 @@ import com.communicatorone.TestcontainersConfiguration;
 import com.communicatorone.organizations.CurrentOrganization;
 import com.communicatorone.people.PeopleFixture.StoredIdentity;
 import com.communicatorone.people.PeopleFixture.StoredPerson;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -20,6 +20,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
@@ -27,8 +29,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestConstructor;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -38,22 +39,21 @@ import org.springframework.transaction.support.TransactionTemplate;
 class PersonDirectoryTest {
 
     private static final Instant NOW = MutableClock.INITIAL_INSTANT;
-    private static final Duration TIMEOUT = Duration.ofSeconds(10);
 
     private final PersonDirectory directory;
     private final CurrentOrganization currentOrganization;
-    private final PlatformTransactionManager transactionManager;
+    private final TransactionTemplate transactionTemplate;
     private final MutableClock clock;
     private final ExecutorService background = Executors.newFixedThreadPool(2);
     private final PeopleFixture fixture;
 
     PersonDirectoryTest(PersonDirectory directory, CurrentOrganization currentOrganization,
-            JdbcTemplate jdbcTemplate, PlatformTransactionManager transactionManager, MutableClock clock) {
+            JdbcTemplate jdbcTemplate, TransactionTemplate transactionTemplate, MutableClock clock) {
         this.directory = directory;
         this.currentOrganization = currentOrganization;
-        this.transactionManager = transactionManager;
+        this.transactionTemplate = transactionTemplate;
         this.clock = clock;
-        this.fixture = new PeopleFixture(jdbcTemplate, transactionManager, background);
+        this.fixture = new PeopleFixture(jdbcTemplate, transactionTemplate, background);
     }
 
     @BeforeEach
@@ -76,9 +76,7 @@ class PersonDirectoryTest {
         var personId = resolveIn(acme, ContactIdentity.phone("+54 9 11 5555-0101"));
 
         // Then
-        assertThat(fixture.peopleOf(acme)).containsExactly(new StoredPerson(personId, NOW));
-        assertThat(fixture.identitiesOf(acme))
-                .containsExactly(new StoredIdentity(personId, IdentityKind.PHONE, "+5491155550101"));
+        assertOnlyPerson(acme, personId, IdentityKind.PHONE, "+5491155550101");
     }
 
     @Test
@@ -92,9 +90,7 @@ class PersonDirectoryTest {
 
         // Then
         assertThat(resolvedPerson).isEqualTo(knownPerson);
-        assertThat(fixture.peopleOf(acme)).containsExactly(new StoredPerson(knownPerson, NOW));
-        assertThat(fixture.identitiesOf(acme))
-                .containsExactly(new StoredIdentity(knownPerson, IdentityKind.PHONE, "+5491155550101"));
+        assertOnlyPerson(acme, knownPerson, IdentityKind.PHONE, "+5491155550101");
     }
 
     @Test
@@ -108,9 +104,7 @@ class PersonDirectoryTest {
 
         // Then
         assertThat(resolvedPerson).isEqualTo(knownPerson);
-        assertThat(fixture.peopleOf(acme)).containsExactly(new StoredPerson(knownPerson, NOW));
-        assertThat(fixture.identitiesOf(acme))
-                .containsExactly(new StoredIdentity(knownPerson, IdentityKind.EMAIL, "ana.perez@acme.test"));
+        assertOnlyPerson(acme, knownPerson, IdentityKind.EMAIL, "ana.perez@acme.test");
     }
 
     @Test
@@ -146,12 +140,8 @@ class PersonDirectoryTest {
         // Then
         assertThat(globexPerson).isNotEqualTo(acmePerson);
         assertThat(acmePersonAgain).isEqualTo(acmePerson);
-        assertThat(fixture.peopleOf(acme)).containsExactly(new StoredPerson(acmePerson, NOW));
-        assertThat(fixture.identitiesOf(acme))
-                .containsExactly(new StoredIdentity(acmePerson, IdentityKind.PHONE, "+5491155550101"));
-        assertThat(fixture.peopleOf(globex)).containsExactly(new StoredPerson(globexPerson, NOW));
-        assertThat(fixture.identitiesOf(globex))
-                .containsExactly(new StoredIdentity(globexPerson, IdentityKind.PHONE, "+5491155550101"));
+        assertOnlyPerson(acme, acmePerson, IdentityKind.PHONE, "+5491155550101");
+        assertOnlyPerson(globex, globexPerson, IdentityKind.PHONE, "+5491155550101");
     }
 
     @Test
@@ -171,9 +161,7 @@ class PersonDirectoryTest {
 
         // Then
         assertThat(resolvedPerson).isEqualTo(rival.personId());
-        assertThat(fixture.peopleOf(acme)).containsExactly(new StoredPerson(rival.personId(), NOW));
-        assertThat(fixture.identitiesOf(acme))
-                .containsExactly(new StoredIdentity(rival.personId(), IdentityKind.PHONE, "+5491155550101"));
+        assertOnlyPerson(acme, rival.personId(), IdentityKind.PHONE, "+5491155550101");
         assertThat(output.getAll())
                 .contains("person_identities_organization_id_kind_value_key")
                 .doesNotContain("5491155550101");
@@ -192,34 +180,18 @@ class PersonDirectoryTest {
         assertThat(fixture.identitiesInAnyOrganizationWithValue(email)).isZero();
     }
 
-    @Test
-    void identityCannotBeResolvedInsideAnOpenTransaction() {
+    @ParameterizedTest
+    @EnumSource(value = Propagation.class, names = {"REQUIRED", "SUPPORTS"})
+    void identityCannotBeResolvedInsideAnOpenTransactionalScope(Propagation propagation) {
         // Given
         var acme = fixture.organization("Acme");
-        var transaction = new TransactionTemplate(transactionManager);
+        var scope = new TransactionTemplate(transactionTemplate.getTransactionManager());
+        scope.setPropagationBehavior(propagation.value());
 
         // When
         var rejection = catchThrowable(() -> currentOrganization.runAs(acme,
-                () -> transaction.executeWithoutResult(
+                () -> scope.executeWithoutResult(
                         status -> directory.resolveOrCreate(ContactIdentity.phone("+54 9 11 5555-0101")))));
-
-        // Then
-        assertThat(rejection).isInstanceOf(IllegalStateException.class);
-        assertThat(fixture.peopleOf(acme)).isEmpty();
-        assertThat(fixture.identitiesOf(acme)).isEmpty();
-    }
-
-    @Test
-    void identityCannotBeResolvedInsideATransactionalScopeWithoutActualTransaction() {
-        // Given
-        var acme = fixture.organization("Acme");
-        var supports = new TransactionTemplate(transactionManager);
-        supports.setPropagationBehavior(TransactionDefinition.PROPAGATION_SUPPORTS);
-
-        // When
-        var rejection = catchThrowable(() -> currentOrganization.runAs(acme,
-                () -> supports.executeWithoutResult(
-                        scope -> directory.resolveOrCreate(ContactIdentity.phone("+54 9 11 5555-0101")))));
 
         // Then
         assertThat(rejection).isInstanceOf(IllegalStateException.class);
@@ -229,5 +201,10 @@ class PersonDirectoryTest {
 
     private UUID resolveIn(UUID organizationId, ContactIdentity identity) {
         return currentOrganization.callAs(organizationId, () -> directory.resolveOrCreate(identity));
+    }
+
+    private void assertOnlyPerson(UUID organizationId, UUID personId, IdentityKind kind, String value) {
+        assertThat(fixture.peopleOf(organizationId)).containsExactly(new StoredPerson(personId, NOW));
+        assertThat(fixture.identitiesOf(organizationId)).containsExactly(new StoredIdentity(personId, kind, value));
     }
 }

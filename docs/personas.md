@@ -29,7 +29,7 @@ organización la asigna y filtra Hibernate con `@TenantId` (P-018).
 
 | Clase | Visibilidad | Qué hace |
 |---|---|---|
-| `PersonDirectory` | pública (API) | `@Service` con `resolveOrCreate(ContactIdentity): UUID` (`PersonDirectory.java:30-40`). Arma dos `TransactionTemplate`, uno de escritura y otro de solo lectura (`PersonDirectory.java:22-28`). |
+| `PersonDirectory` | pública (API) | `@Service` con `resolveOrCreate(ContactIdentity): UUID` (`PersonDirectory.java:27-37`). Arma un `TransactionTemplate` para la búsqueda y la creación (`PersonDirectory.java:21-25`). |
 | `ContactIdentity` | pública (API) | `record (IdentityKind kind, String value)` que se normaliza en el constructor compacto (`ContactIdentity.java:14-17`), con fábricas `phone(raw)` y `email(raw)` (`ContactIdentity.java:19-25`). `toString` muestra solo el tipo (`ContactIdentity.java:27-30`). |
 | `IdentityKind` | pública (API) | `PHONE`, `EMAIL`, `INSTAGRAM_USER`, `MESSENGER_USER`, `TELEGRAM_USER` (`IdentityKind.java:3-9`). |
 | `InvalidContactIdentityException` | pública (API) | Unchecked, con constructor package-private; el mensaje es «Invalid <tipo> identity», sin el valor (`InvalidContactIdentityException.java:3-8`). |
@@ -72,7 +72,7 @@ Quien llama a `resolveOrCreate`:
 
 1. **No tiene una transacción abierta.** La operación abre la suya y, si hay sincronización de transacción activa
    (una transacción real o un ámbito `SUPPORTS`), lanza `IllegalStateException` sin tocar la base
-   (`PersonDirectory.java:32-33`). Es la misma comprobación de transacción que hace `CurrentOrganization.runAs`,
+   (`PersonDirectory.java:29-30`). Es la misma comprobación de transacción que hace `CurrentOrganization.runAs`,
    sin la del `EntityManager` abierto.
 2. **Tiene organización activa:** corre dentro de `currentOrganization.callAs(organizationId, ...)` (webhooks, jobs)
    o en un request con operador autenticado. Sin organización, la creación falla con
@@ -109,7 +109,7 @@ flowchart TD
     F -->|no existe| S[saveAndFlush Person + PersonIdentity]
     S -->|ok| NEW[id de la persona nueva]
     S -->|DataIntegrityViolationException| RB[rollback]
-    RB --> RR{relectura en transacción<br/>nueva de solo lectura}
+    RB --> RR{relectura directa al repositorio<br/>fuera de la transacción}
     RR -->|existe| ID2[id de la persona que creó la otra transacción]
     RR -->|no existe| E[relanza la excepción original<br/>p. ej. sin organización activa]
 ```
@@ -129,7 +129,7 @@ sequenceDiagram
     A->>DB: COMMIT
     DB-->>B: 23505 unique violation
     Note over B: DataIntegrityViolationException<br/>rollback entero de B (sin persona huérfana)
-    B->>DB: nueva transacción readOnly: SELECT p.id ...
+    B->>DB: relectura sin transacción (autocommit): SELECT p.id ...
     DB-->>B: id de la persona de A
 ```
 
@@ -143,13 +143,14 @@ El constructor compacto rechaza un `kind` nulo con `NullPointerException` y reem
 `InvalidContactIdentityException`, y el resto se recorta con `strip()` (`ContactIdentity.java:32-36`). Después,
 un `switch` sobre el tipo (`ContactIdentity.java:37-41`):
 
-- **Teléfono** (`ContactIdentity.java:44-59`): `PhoneNumberUtil.parse(valor, "ZZ")`. La región `ZZ` es «desconocida»:
+- **Teléfono** (`ContactIdentity.java:44-54`): con el `PhoneNumberUtil` de la constante estática `PHONE_NUMBERS`
+  (`ContactIdentity.java:12`), `parse(valor, "ZZ")`, todo en un único `try`. La región `ZZ` es «desconocida»:
   libphonenumber solo acepta números en formato internacional, con `+`. Si no parsea (`NumberParseException`) o no es
   un número posible (`isPossibleNumber`, que mira longitud por país), `InvalidContactIdentityException`. Si pasa, se
   guarda en E.164. No se usa región por defecto porque la organización no tiene país y una región equivocada
   adjudicaría el número a otra persona sin avisar; no se usa `isValidNumber` porque con metadata vieja rechazaría
   números reales (P-028).
-- **Email** (`ContactIdentity.java:61-66`): exige una «@» y pasa a minúsculas con `Locale.ROOT`. No toca puntos ni
+- **Email** (`ContactIdentity.java:56-61`): exige una «@» y pasa a minúsculas con `Locale.ROOT`. No toca puntos ni
   alias (`+ventas`) ni valida nada más.
 - **Ids de canal** (`INSTAGRAM_USER`, `MESSENGER_USER`, `TELEGRAM_USER`): solo `strip()`. Respetan mayúsculas.
 
@@ -164,14 +165,14 @@ Ejemplos (salidas de los tests de `ContactIdentityTest` salvo donde se indica):
 | `phone("+54 12")`, `phone("hola")` | `InvalidContactIdentityException` (no es un número posible) |
 | `email("  Ana.Perez+Ventas@Acme.TEST ")` | `EMAIL` `ana.perez+ventas@acme.test` |
 | `email("ana.perez.acme.test")`, `email("")`, `email("   ")` | `InvalidContactIdentityException` |
-| `new ContactIdentity(TELEGRAM_USER, "  AbC-123_xY ")` | `TELEGRAM_USER` `AbC-123_xY`, distinta de `abc-123_xy` |
+| `new ContactIdentity(TELEGRAM_USER, "  AbC-123_xY ")` | `TELEGRAM_USER` `AbC-123_xY` (conserva las mayúsculas) |
 | `new ContactIdentity(null, "ana@acme.test")` | `NullPointerException` |
 | `phone("+54 9 11 5555-0101").toString()` | `ContactIdentity[PHONE]` |
 | Mensaje de la excepción de un teléfono inválido | `Invalid PHONE identity` |
 
 ### Resolución (`PersonDirectory.resolveOrCreate`)
 
-`PersonDirectory.java:30-40`:
+`PersonDirectory.java:27-37`:
 
 1. Rechaza una identidad nula (`NullPointerException`) y, con `Assert.state`, la sincronización de transacción activa
    (`IllegalStateException`, «A person is resolved in its own transaction, not inside an open one»).
@@ -184,9 +185,11 @@ Ejemplos (salidas de los tests de `ContactIdentityTest` salvo donde se indica):
    `person_id`. Hibernate asigna `organization_id` a las dos filas. El `flush` adentro del callback hace que una
    violación salga como `DataIntegrityViolationException` ahí mismo, y no en el commit.
 4. Si el `INSERT` choca con el `UNIQUE (organization_id, kind, value)`, la transacción de escritura se deshace entera y
-   se relee en una transacción nueva de solo lectura (`PersonDirectory.java:37-38`). Con READ COMMITTED (el default de
-   PostgreSQL) la relectura ve la persona que confirmó la otra transacción y devuelve su id. Si no hay nada, relanza la
-   excepción original.
+   se relee con una llamada directa al repositorio, ya fuera de esa transacción (`PersonDirectory.java:34-35`). La
+   consulta no abre transacción (Spring Data no le pone una por defecto a un `@Query` declarado en la interfaz): pasa
+   por el `EntityManager` compartido de Spring, que abre una sesión para esa consulta con la organización activa del
+   `callAs` o del usuario, y corre en autocommit. Con READ COMMITTED (el default de PostgreSQL) ve la persona que
+   confirmó la otra transacción y devuelve su id. Si no hay nada, relanza la excepción original.
 
 El caso «sin organización» pasa por el mismo camino: el `INSERT` falla por la FK contra el centinela, la relectura (que
 filtra por el centinela) no encuentra nada y sale la `DataIntegrityViolationException` original.
@@ -266,12 +269,12 @@ además, que el mensaje de la excepción no contenga el valor ni sus dígitos (`
 
 | Test | Qué cubre |
 |---|---|
-| `phoneWrittenInDifferentFormatsIsNormalizedToTheSameE164Identity` | Argentina, Estados Unidos y España, cada uno escrito de tres formas: todas dan la misma `ContactIdentity` en E.164. |
+| `phoneWrittenInDifferentFormatsIsNormalizedToTheSameE164Identity` | Argentina, Estados Unidos y España, cada uno escrito de tres formas: todas dan `PHONE` con el mismo valor E.164. |
 | `phoneWithoutInternationalPrefixIsRejected` | «11 5555-0101», «011 5555-0101» y «5491155550101» (sin `+`) se rechazan sin revelar el número. |
 | `impossiblePhoneIsRejected` | «+54 12» y «hola» se rechazan sin revelar el valor. |
 | `emailIsNormalizedToLowercaseWithoutSurroundingSpaces` | Recorta y pasa a minúsculas, conservando el alias `+ventas`. |
-| `emailWithoutAtSignIsRejected` | Sin «@», vacío o en blanco. |
-| `channelUserIdKeepsItsCaseWithoutSurroundingSpaces` | Para los tres `*_USER`: recorta y distingue mayúsculas. |
+| `emailWithoutAtSignIsRejected` | Un email sin «@» se rechaza sin revelar el valor (vacío y en blanco los cubre `identityWithoutValueIsRejected`). |
+| `channelUserIdKeepsItsCaseWithoutSurroundingSpaces` | Para los tres `*_USER`: recorta y conserva las mayúsculas. |
 | `identityWithoutKindIsRejected` | `kind` nulo da `NullPointerException`. |
 | `identityWithoutValueIsRejected` | Para cada tipo, valor nulo, vacío o en blanco da `InvalidContactIdentityException`. |
 | `identityDoesNotRevealItsValueWhenPrinted` | `toString` de un teléfono y de un email muestra el tipo y no el dato. |
@@ -290,8 +293,7 @@ y resuelve con `callAs` (`resolveIn`). Las filas se leen con `PeopleFixture` (`J
 | `sameIdentityInAnotherOrganizationResolvesToADifferentPerson` | El mismo teléfono en Globex es otra persona, y Acme sigue resolviendo a la suya: el JPQL con join filtra por organización. |
 | `concurrentResolutionOfTheSameNewIdentityCreatesASinglePerson` | La carrera del diagrama, determinista: un hilo rival inserta la persona y la identidad sin confirmar (`PeopleFixture.rivalStartsCreatingPerson`); la resolución corre en otro hilo; Awaitility espera en `pg_stat_activity` otra sesión bloqueada por un lock sobre `person_identities` (`anotherSessionIsWaitingToWriteIdentities`) y recién ahí confirma el rival. Afirma que devuelve el id del rival, que hay una sola persona y una sola identidad, y que la salida capturada nombra la restricción sin contener el teléfono (P-031). |
 | `identityCannotBeResolvedWithoutOrganization` | Sin ámbito ni usuario: `DataIntegrityViolationException` y ninguna identidad con ese valor en ninguna organización. |
-| `identityCannotBeResolvedInsideAnOpenTransaction` | Dentro de un `TransactionTemplate`: `IllegalStateException` y nada guardado. |
-| `identityCannotBeResolvedInsideATransactionalScopeWithoutActualTransaction` | Dentro de un ámbito `SUPPORTS`: `IllegalStateException` y nada guardado. |
+| `identityCannotBeResolvedInsideAnOpenTransactionalScope` | Parametrizado con `Propagation.REQUIRED` (transacción real) y `Propagation.SUPPORTS` (ámbito sin transacción): `IllegalStateException` y nada guardado. |
 
 `TenantIsolationTest.everyBusinessEntityBelongsToAnOrganization` cubre que `Person` y `PersonIdentity` lleven
 `@TenantId`, y `ModularStructureTest` que `people` no dependa de internos de otros módulos.

@@ -3,13 +3,13 @@ package com.communicatorone.people;
 import com.google.i18n.phonenumbers.NumberParseException;
 import com.google.i18n.phonenumbers.PhoneNumberUtil;
 import com.google.i18n.phonenumbers.PhoneNumberUtil.PhoneNumberFormat;
-import com.google.i18n.phonenumbers.Phonenumber.PhoneNumber;
 import java.util.Locale;
 import java.util.Objects;
 
 public record ContactIdentity(IdentityKind kind, String value) {
 
     private static final String UNKNOWN_REGION = "ZZ";
+    private static final PhoneNumberUtil PHONE_NUMBERS = PhoneNumberUtil.getInstance();
 
     public ContactIdentity {
         Objects.requireNonNull(kind, "kind");
@@ -42,17 +42,12 @@ public record ContactIdentity(IdentityKind kind, String value) {
     }
 
     private static String e164(String phone) {
-        var phoneNumbers = PhoneNumberUtil.getInstance();
-        var number = parsed(phoneNumbers, phone);
-        if (!phoneNumbers.isPossibleNumber(number)) {
-            throw new InvalidContactIdentityException(IdentityKind.PHONE);
-        }
-        return phoneNumbers.format(number, PhoneNumberFormat.E164);
-    }
-
-    private static PhoneNumber parsed(PhoneNumberUtil phoneNumbers, String phone) {
         try {
-            return phoneNumbers.parse(phone, UNKNOWN_REGION);
+            var number = PHONE_NUMBERS.parse(phone, UNKNOWN_REGION);
+            if (!PHONE_NUMBERS.isPossibleNumber(number)) {
+                throw new InvalidContactIdentityException(IdentityKind.PHONE);
+            }
+            return PHONE_NUMBERS.format(number, PhoneNumberFormat.E164);
         } catch (NumberParseException unparseable) {
             throw new InvalidContactIdentityException(IdentityKind.PHONE);
         }

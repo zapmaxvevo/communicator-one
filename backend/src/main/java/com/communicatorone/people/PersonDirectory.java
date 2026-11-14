@@ -16,14 +16,11 @@ public class PersonDirectory {
 
     private final PersonRepository people;
     private final TransactionTemplate writing;
-    private final TransactionTemplate reading;
     private final Clock clock;
 
     PersonDirectory(PersonRepository people, PlatformTransactionManager transactionManager, Clock clock) {
         this.people = people;
         this.writing = new TransactionTemplate(transactionManager);
-        this.reading = new TransactionTemplate(transactionManager);
-        this.reading.setReadOnly(true);
         this.clock = clock;
     }
 
@@ -35,7 +32,7 @@ public class PersonDirectory {
             return writing.execute(transaction -> findIdOf(identity)
                     .orElseGet(() -> people.saveAndFlush(Person.identifiedBy(identity, clock)).id()));
         } catch (DataIntegrityViolationException concurrentCreation) {
-            return reading.execute(transaction -> findIdOf(identity)).orElseThrow(() -> concurrentCreation);
+            return findIdOf(identity).orElseThrow(() -> concurrentCreation);
         }
     }
 

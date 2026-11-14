@@ -3,6 +3,7 @@ package com.communicatorone.people;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.communicatorone.MutableClock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -13,21 +14,19 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 class PeopleFixture {
 
-    private static final long TIMEOUT_SECONDS = 10;
+    static final Duration TIMEOUT = Duration.ofSeconds(10);
 
     private final JdbcTemplate jdbcTemplate;
     private final TransactionTemplate transactionTemplate;
     private final ExecutorService background;
 
-    PeopleFixture(JdbcTemplate jdbcTemplate, PlatformTransactionManager transactionManager,
-            ExecutorService background) {
+    PeopleFixture(JdbcTemplate jdbcTemplate, TransactionTemplate transactionTemplate, ExecutorService background) {
         this.jdbcTemplate = jdbcTemplate;
-        this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.transactionTemplate = transactionTemplate;
         this.background = background;
     }
 
@@ -70,7 +69,7 @@ class PeopleFixture {
             inserted.countDown();
             awaitRelease(release);
         }));
-        assertThat(inserted.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)).as("rival inserted its person").isTrue();
+        assertThat(inserted.await(TIMEOUT.toSeconds(), TimeUnit.SECONDS)).as("rival inserted its person").isTrue();
         return new RivalCreation(personId, release, transaction);
     }
 
@@ -87,7 +86,7 @@ class PeopleFixture {
 
     private static void awaitRelease(CountDownLatch release) {
         try {
-            if (!release.await(TIMEOUT_SECONDS * 3, TimeUnit.SECONDS)) {
+            if (!release.await(TIMEOUT.multipliedBy(3).toSeconds(), TimeUnit.SECONDS)) {
                 throw new IllegalStateException("The rival creation was never released");
             }
         } catch (InterruptedException interrupted) {
@@ -106,7 +105,7 @@ class PeopleFixture {
 
         void commit() throws Exception {
             release.countDown();
-            transaction.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            transaction.get(TIMEOUT.toSeconds(), TimeUnit.SECONDS);
         }
     }
 }
