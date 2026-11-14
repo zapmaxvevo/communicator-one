@@ -15,8 +15,8 @@ Para tests seguí `tests.md`; para migraciones, `flyway.md`.
   `AssignmentStrategy`, `AttentionTimer`). La documentación de `docs/` va en español.
 
 ## Módulos y capas
-- Un módulo de Spring Modulith por concepto (`organizations`, `people`, `opportunities`, `messaging`, `channels`,
-  `assignment`, `notifications`). El paquete raíz del módulo es su API pública; los subpaquetes son internos y nadie
+- Un módulo de Spring Modulith por concepto (`organizations`, `operators`, `people`, `opportunities`, `messaging`,
+  `channels`, `assignment`, `notifications`). El paquete raíz del módulo es su API pública; los subpaquetes son internos y nadie
   de afuera los importa. `ApplicationModules.verify()` tiene que pasar siempre.
 - Entre módulos: llamadas a la API pública o eventos de dominio. Efectos que no tienen que bloquear al que publica
   (notificar por WebSocket, arrancar un temporizador) van por evento, después del commit.
@@ -80,7 +80,11 @@ y local sobre un enum propio del módulo está bien; lo que se evita es repartir
 - La organización activa la da `CurrentOrganization` (módulo `organizations`): el ámbito explícito de `runAs`/`callAs`
   o, si no hay, el principal autenticado que implementa `OrganizationMember`. Sin ninguno de los dos, las lecturas
   vuelven vacías y las escrituras fallan.
-- SQL nativo y `JdbcTemplate` **no** pasan por `@TenantId`: filtran por `organization_id` a mano, siempre.
+- SQL nativo y `JdbcTemplate` **no** pasan por `@TenantId`: filtran por `organization_id` a mano, siempre. Única
+  excepción: `OperatorEmailDirectory` (módulo `operators`, P-022) busca por email sin filtrar organización porque el
+  login todavía no tiene una; solo devuelve el `organization_id`, y el operador se carga después con `callAs` y la
+  lectura filtrada (`docs/autenticacion.md`). Otra consulta que cruce organizaciones se decide en su tarea y se anota
+  como provisoria.
 - Procesos sin usuario (webhooks, jobs, listeners) llaman a `currentOrganization.runAs(organizationId, ...)` **fuera**
   de la transacción, con el `@Transactional` adentro: la organización se fija al abrir la sesión, y `runAs` lanza
   `IllegalStateException` si hay sincronización de transacción activa (una transacción o un ámbito `SUPPORTS`) o si ya

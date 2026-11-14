@@ -25,16 +25,17 @@ backend/             Spring Boot 4 + Maven wrapper, paquete raíz com.communicat
 docker-compose.yml   PostgreSQL 18 y Redis para desarrollo local
 .env.example         variables de entorno (copiar a .env)
 web/                 React + TS + Vite (prevista, issue #3)
-docs/                visión, decisiones, equivalencias del backlog
+docs/                visión, decisiones, multi-tenant, autenticación, equivalencias del backlog
 scripts/             issues.py (issues, subissues y estados del Project con gh)
 .github/             plantillas de issue (tarea, error) y de PR
 .claude/             agentes, skills, rules y hooks de Claude Code
 ```
 
 En `backend/`, cada módulo de Spring Modulith es un subpaquete directo de `com.communicatorone` con un
-`package-info.java` anotado `@ApplicationModule`: `organizations`, `people`, `opportunities`, `messaging`, `channels`,
-`assignment`, `notifications`. La configuración transversal (como `SecurityConfiguration`) va en el paquete raíz: un
-subpaquete directo nuevo es un módulo más y rompe `ModularStructureTest` a propósito.
+`package-info.java` anotado `@ApplicationModule`. Son ocho: `organizations`, `operators`, `people`, `opportunities`,
+`messaging`, `channels`, `assignment`, `notifications`. La configuración transversal (como `SecurityConfiguration`,
+`ApiExceptionHandler` y `ClockConfiguration`) va en el paquete raíz: un subpaquete directo nuevo es un módulo más y
+rompe `ModularStructureTest` a propósito.
 
 ## Comandos
 
@@ -44,7 +45,7 @@ Requisitos: Java 25, Docker (para compose y Testcontainers) y `unzip` (para el w
 Entorno local, desde la raíz:
 
 ```bash
-cp .env.example .env        # opcional: los defaults ya coinciden con compose y application.yml
+cp .env.example .env        # y completar JWT_SECRET con: openssl rand -base64 48
 docker compose up -d        # PostgreSQL 18 y Redis, publicados solo en 127.0.0.1
 docker compose ps           # estado y healthchecks
 docker compose down         # para los contenedores y conserva los datos
@@ -56,20 +57,26 @@ docker compose down -v      # además borra el volumen de Postgres (reset del en
 - `DB_USERNAME`, `DB_PASSWORD` y `POSTGRES_DB` solo se aplican al crear el volumen en el primer `up`. Si después
   cambian usuario o clave, la app falla al autenticar; si cambia `POSTGRES_DB`, la base no existe. En los dos casos:
   `docker compose down -v && docker compose up -d`.
-- Spring no lee `.env`. Para correr la app con valores propios:
-  `set -a && . ../.env && set +a && ./mvnw spring-boot:run` (desde `backend/`).
+- `JWT_SECRET` es obligatoria (sin default, P-023): sin ella, en blanco o con menos de 32 bytes, la app no arranca.
+  Las demás variables tienen defaults que coinciden con compose y `application.yml`.
+- Spring no lee `.env`: hay que exportar sus variables antes de correr la app, desde `backend/`:
+  `set -a; . ../.env; set +a; ./mvnw spring-boot:run`. Los tests no necesitan `JWT_SECRET`
+  (`TestcontainersConfiguration` registra un secreto solo de test).
 
 Backend, desde `backend/`:
 
 ```bash
 ./mvnw verify                              # suite completa
 ./mvnw test -Dtest=ModularStructureTest    # estructura de módulos, sin Docker
-./mvnw spring-boot:run                     # necesita el Postgres de compose; puerto 8080 (otro: SERVER_PORT=8081)
+./mvnw spring-boot:run                     # necesita el Postgres de compose y JWT_SECRET exportada; puerto 8080 (otro: SERVER_PORT=8081)
 curl -s localhost:8080/actuator/health     # {"groups":["liveness","readiness"],"status":"UP"}
 ```
 
-Son públicos `/error` y `/actuator/health` y todas sus subrutas (entre ellas liveness y readiness, para las probes);
-todo lo demás (resto de actuator, Swagger, `/v3/api-docs`, `/api/**`) responde 401 hasta el issue #5 (JWT), ver P-006.
+Son públicos `/error`, `/actuator/health` y todas sus subrutas (entre ellas liveness y readiness, para las probes) y
+`POST /api/auth/login`; todo lo demás (resto de actuator, Swagger, `/v3/api-docs`, `/api/**`) pide
+`Authorization: Bearer <JWT>` y sin él responde 401 (P-006, P-023, P-024). Login, token, contrato para los clientes y
+cómo dar de alta un operador en desarrollo: `docs/autenticacion.md`.
+
 Los tests de integración importan `TestcontainersConfiguration` (`@Import`), que levanta con Docker su propio
 PostgreSQL (no usa el de compose), compartido por toda la corrida con `@ServiceConnection`. Las migraciones Flyway van
 en `src/main/resources/db/migration` (ubicación por defecto; la primera es `V1__create_organizations.sql`). En los

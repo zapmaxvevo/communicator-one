@@ -11,3 +11,7 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+
+communicator-one:
+  authentication:
+    jwt-secret: ${JWT_SECRET}
