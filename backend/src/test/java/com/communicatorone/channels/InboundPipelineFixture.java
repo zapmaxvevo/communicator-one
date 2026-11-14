@@ -71,6 +71,11 @@ class InboundPipelineFixture {
         return webhook(externalAccountId, List.of(), List.of(statuses));
     }
 
+    WebhookPayload whatsAppTextTo(String phoneNumberId) {
+        var example = WhatsAppExamples.payload("text-message.json");
+        return new WebhookPayload(example.body().replace("106540352242922", phoneNumberId));
+    }
+
     Conversation conversationWith(UUID organizationId, String phone) {
         return currentOrganization.callAs(organizationId, () -> {
             var personId = people.resolveOrCreate(ContactIdentity.phone(phone));

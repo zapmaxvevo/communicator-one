@@ -1,0 +1,97 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "102290129340398",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "15550783881",
+              "phone_number_id": "106540352242922"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "Ana Pérez"
+                },
+                "wa_id": "5491155550101"
+              }
+            ],
+            "messages": [
+              {
+                "from": "5491155550101",
+                "id": "wamid.HBgNNTQ5MTE1NTU1MDEwMRUCABIYFjNFQjBBMUYyQzk4RDQ3RTVCNjAxAA==",
+                "timestamp": "1772441960",
+                "text": {
+                  "body": "Hola, ¿tienen financiación?"
+                },
+                "type": "text"
+              }
+            ]
+          },
+          "field": "messages"
+        },
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "15550783882",
+              "phone_number_id": "107655329956071"
+            },
+            "statuses": [
+              {
+                "id": "wamid.HBgNNTQ5MTE1NTU1MDEwMRUCABEYEjQyQTdGOEQ5RTBGMUEyQjNDNAA=",
+                "status": "delivered",
+                "timestamp": "1772442010",
+                "recipient_id": "5491155550101"
+              },
+              {
+                "id": "wamid.HBgLMzQ2MTIzNDU2NzgVAgARGBI1QjhFOUYwQTFCMkMzRDRFNUYA",
+                "status": "read",
+                "timestamp": "1772442065",
+                "recipient_id": "34612345678"
+              }
+            ]
+          },
+          "field": "messages"
+        }
+      ]
+    },
+    {
+      "id": "102290129340399",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "15550783883",
+              "phone_number_id": "108811223344556"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "Juan García"
+                },
+                "wa_id": "34612345678"
+              }
+            ],
+            "messages": [
+              {
+                "from": "34612345678",
+                "id": "wamid.HBgLMzQ2MTIzNDU2NzgVAgASGBYzRUIwQjJFM0Q4N0U1OEY2QzcwMgA=",
+                "timestamp": "1772442065",
+                "text": {
+                  "body": "¿Hacen envíos a Madrid?"
+                },
+                "type": "text"
+              }
+            ]
+          },
+          "field": "messages"
+        }
+      ]
+    }
+  ]
+}
