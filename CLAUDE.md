@@ -25,7 +25,7 @@ backend/             Spring Boot 4 + Maven wrapper, paquete raíz com.communicat
 docker-compose.yml   PostgreSQL 18 y Redis para desarrollo local
 .env.example         variables de entorno (copiar a .env)
 web/                 React + TS + Vite (prevista, issue #3)
-docs/                visión, decisiones, multi-tenant, autenticación, equivalencias del backlog
+docs/                visión, decisiones, multi-tenant, autenticación, personas, equivalencias del backlog
 scripts/             issues.py (issues, subissues y estados del Project con gh)
 .github/             plantillas de issue (tarea, error) y de PR
 .claude/             agentes, skills, rules y hooks de Claude Code
@@ -99,7 +99,7 @@ El wrapper verifica Maven con `distributionSha256Sum` (`.mvn/wrapper/maven-wrapp
 |---|---|
 | Organización (tenant, empresa cliente) | `Organization` |
 | Persona (permanente) | `Person` |
-| Identidad de contacto (wa_id, @ig, email…) | `ContactIdentity` |
+| Identidad de contacto (teléfono E.164, email, id del canal…) | `ContactIdentity` |
 | Oportunidad (episodio con ciclo de vida) | `Opportunity` |
 | Mensaje | `Message` |
 | Cuenta de canal (nuestro número, página, bot) | `ChannelAccount` |

@@ -20,7 +20,8 @@ La organización activa la resuelve `CurrentOrganization`, en este orden:
    Las lecturas vuelven vacías y las escrituras fallan por la FK a `organizations`.
 
 Se activa sola: cualquier sesión de Hibernate que se abra consulta al resolver. Todavía no hay endpoints ni alta de
-organizaciones; la primera entidad de negocio es `Operator` (#5).
+organizaciones; la primera entidad de negocio es `Operator` (#5), y después vienen `Person` y `PersonIdentity` (#6,
+`docs/personas.md`).
 
 ## Piezas
 
