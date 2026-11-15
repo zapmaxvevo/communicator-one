@@ -188,8 +188,8 @@ class WhatsAppChannelAdapterTest {
     @Test
     void eachSenderGetsTheProfileNameOfTheContactWithHerWaId() {
         // Given
-        var payload = new WebhookPayload(withContactsAndMessages(
-                String.join(", ", JUAN_CONTACT, ANA_CONTACT), String.join(", ", ANA_TEXT, JUAN_TEXT)));
+        var payload = new WebhookPayload(withContacts(
+                "[%s, %s]".formatted(JUAN_CONTACT, ANA_CONTACT), String.join(", ", ANA_TEXT, JUAN_TEXT)));
 
         // When
         var inbound = whatsApp.parseInbound(payload);
@@ -203,9 +203,9 @@ class WhatsAppChannelAdapterTest {
     @Test
     void firstOfTwoContactsWithHerWaIdNamesTheSender() {
         // Given
-        var payload = new WebhookPayload(withContactsAndMessages("""
-                {"profile": {"name": "Ana P."}, "wa_id": "5491155550101"},
-                {"profile": {"name": "Ana Pérez"}, "wa_id": "5491155550101"}""", ANA_TEXT));
+        var payload = new WebhookPayload(withContacts("""
+                [{"profile": {"name": "Ana P."}, "wa_id": "5491155550101"},
+                 {"profile": {"name": "Ana Pérez"}, "wa_id": "5491155550101"}]""", ANA_TEXT));
 
         // When
         var inbound = whatsApp.parseInbound(payload);
@@ -235,7 +235,7 @@ class WhatsAppChannelAdapterTest {
     @MethodSource("contactsWithUnusualProfileNames")
     void profileNameIsPassedAsItComesWithoutRejectingTheWebhook(String contact, String senderName) {
         // Given
-        var payload = new WebhookPayload(withContactsAndMessages(contact, ANA_TEXT));
+        var payload = new WebhookPayload(withContacts("[%s]".formatted(contact), ANA_TEXT));
 
         // When
         var inbound = whatsApp.parseInbound(payload);
@@ -558,14 +558,12 @@ class WhatsAppChannelAdapterTest {
     }
 
     private static String withContacts(String contacts) {
-        return webhookWithValue("""
-                {"messaging_product": "whatsapp", %s, "contacts": %s, "messages": [%s]}"""
-                .formatted(METADATA, contacts, ANA_TEXT));
+        return withContacts(contacts, ANA_TEXT);
     }
 
-    private static String withContactsAndMessages(String contacts, String messages) {
+    private static String withContacts(String contacts, String messages) {
         return webhookWithValue("""
-                {"messaging_product": "whatsapp", %s, "contacts": [%s], "messages": [%s]}"""
+                {"messaging_product": "whatsapp", %s, "contacts": %s, "messages": [%s]}"""
                 .formatted(METADATA, contacts, messages));
     }
 

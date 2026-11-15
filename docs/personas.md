@@ -455,7 +455,7 @@ nombre, `messageFromUnknownIdentityCreatesPersonWithOpenOpportunityAndRecordsThe
 - **México**: el `1` que se anteponía a los móviles (`+52 1 55 1234 5678`) no es un número posible para libphonenumber
   9.0.43 y se rechaza con `InvalidContactIdentityException`; `+52 55 1234 5678` pasa. El adaptador que reciba el
   formato viejo tiene que quitar el `1`: el de WhatsApp (#47) ya lo hace con un `wa_id` `521` + diez dígitos
-  (`WhatsAppChannelAdapter.java:38`, `:211`; lo prueba
+  (`WhatsAppChannelAdapter.java:38`, `:210`; lo prueba
   `WhatsAppChannelAdapterTest.mexicanSenderWithTheOldMobilePrefixKeepsTheirE164PhoneWithoutTheOne`). Estos dos casos
   no están en los tests de `people`.
 - **WhatsApp BSUID**: cuando WhatsApp mande el id de usuario sin teléfono, esa persona va a quedar duplicada respecto

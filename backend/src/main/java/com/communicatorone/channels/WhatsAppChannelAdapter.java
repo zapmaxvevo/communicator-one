@@ -161,7 +161,7 @@ class WhatsAppChannelAdapter implements ChannelAdapter {
     record WhatsAppContact(@JsonProperty("wa_id") String waId, WhatsAppProfile profile) {
 
         Optional<String> profileNameOf(String sender) {
-            if (waId == null || !waId.equals(sender) || profile == null) {
+            if (!sender.equals(waId) || profile == null) {
                 return Optional.empty();
             }
             return Optional.ofNullable(profile.name());
@@ -198,8 +198,7 @@ class WhatsAppChannelAdapter implements ChannelAdapter {
 
         private String profileNameIn(List<WhatsAppContact> contacts) {
             return contacts.stream()
-                    .map(contact -> contact.profileNameOf(from))
-                    .flatMap(Optional::stream)
+                    .flatMap(contact -> contact.profileNameOf(from).stream())
                     .findFirst()
                     .orElse(null);
         }
