@@ -34,6 +34,7 @@ class WhatsAppChannelAdapter implements ChannelAdapter {
     private static final String BUSINESS_ACCOUNT_OBJECT = "whatsapp_business_account";
     private static final String MESSAGES_FIELD = "messages";
     private static final String TEXT_TYPE = "text";
+    private static final Pattern DIGITS = Pattern.compile("\\d+");
     private static final Pattern OLD_MEXICAN_MOBILE = Pattern.compile("521\\d{10}");
     private static final Map<String, MessageStatus> DOMAIN_STATUSES = Map.of(
             "sent", MessageStatus.SENT,
@@ -170,7 +171,7 @@ class WhatsAppChannelAdapter implements ChannelAdapter {
         }
 
         private Optional<ContactIdentity> sender() {
-            if (from == null) {
+            if (from == null || !DIGITS.matcher(from).matches()) {
                 return Optional.empty();
             }
             var phone = OLD_MEXICAN_MOBILE.matcher(from).matches() ? "+52" + from.substring(3) : "+" + from;

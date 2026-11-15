@@ -299,7 +299,25 @@ class WhatsAppChannelAdapterTest {
                         {"id": "wamid.NOFROM-0001", "timestamp": "1772442010",
                          "type": "text", "text": {"body": "Hola"}}"""),
                 Named.of("BSUID sender of a text without timestamp nor body", """
-                        {"from": "US.13491208655302741918", "id": "wamid.BSUID-0002", "type": "text"}"""));
+                        {"from": "US.13491208655302741918", "id": "wamid.BSUID-0002", "type": "text"}"""),
+                Named.of("BSUID sender whose numeric part looks like a phone", """
+                        {"from": "US.15551234567", "id": "wamid.BSUID-0003", "timestamp": "1772442010",
+                         "type": "text", "text": {"body": "Hola"}}"""),
+                Named.of("sender already written with a plus sign", """
+                        {"from": "+5491155550101", "id": "wamid.PLUS-0001", "timestamp": "1772442010",
+                         "type": "text", "text": {"body": "Hola"}}"""),
+                Named.of("sender written with hyphens", """
+                        {"from": "1-555-555-0101", "id": "wamid.HYPHENS-0001", "timestamp": "1772442010",
+                         "type": "text", "text": {"body": "Hola"}}"""),
+                Named.of("sender written with spaces", """
+                        {"from": "54 9 11 5555 0101", "id": "wamid.SPACES-0001", "timestamp": "1772442010",
+                         "type": "text", "text": {"body": "Hola"}}"""),
+                Named.of("sender with keypad letters", """
+                        {"from": "1800FLOWERS", "id": "wamid.LETTERS-0001", "timestamp": "1772442010",
+                         "type": "text", "text": {"body": "Hola"}}"""),
+                Named.of("sender with non-ASCII digits", """
+                        {"from": "٥٤٩١١٥٥٥٥٠١٠١", "id": "wamid.ARABIC-0001", "timestamp": "1772442010",
+                         "type": "text", "text": {"body": "Hola"}}"""));
     }
 
     static Stream<Arguments> malformedPayloadsInBothParsings() {

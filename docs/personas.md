@@ -63,8 +63,10 @@ Configuración: `spring.datasource.hikari.data-source-properties.logServerErrorD
 
 `people` no conoce canales. Cada adaptador decide qué tipo sale de su payload: por ejemplo, el adaptador de WhatsApp
 (#47, P-053) pasa el `wa_id` (dígitos sin `+`, el `from` del mensaje) como `PHONE` anteponiéndole el `+`; a un `wa_id`
-mexicano con el `1` móvil viejo (`521` y diez dígitos) le quita el `1`; e ignora el mensaje cuyo remitente no es un
-teléfono posible (un BSUID) hasta que exista `WHATSAPP_USER` (`docs/canales.md`, «Adaptador `WHATSAPP`»).
+mexicano con el `1` móvil viejo (`521` y diez dígitos) le quita el `1`; e ignora el mensaje cuyo remitente no es
+solo dígitos ASCII (un BSUID, letras, separadores) o no es un teléfono posible, hasta que exista `WHATSAPP_USER`
+(`docs/canales.md`, «Adaptador `WHATSAPP`»). Exige los dígitos antes de llamar a `ContactIdentity.phone` porque
+libphonenumber es laxo con letras de teclado, dígitos no ASCII y separadores.
 `WEBCHAT_VISITOR` y `WHATSAPP_USER` (BSUID) se agregan con sus tareas.
 
 ## Contrato de uso
@@ -348,7 +350,7 @@ y resuelve con `callAs` (`resolveIn`). Las filas se leen con `PeopleFixture` (`J
 - **México**: el `1` que se anteponía a los móviles (`+52 1 55 1234 5678`) no es un número posible para libphonenumber
   9.0.43 y se rechaza con `InvalidContactIdentityException`; `+52 55 1234 5678` pasa. El adaptador que reciba el
   formato viejo tiene que quitar el `1`: el de WhatsApp (#47) ya lo hace con un `wa_id` `521` + diez dígitos
-  (`WhatsAppChannelAdapter.java:37`, `:176`; lo prueba
+  (`WhatsAppChannelAdapter.java:38`, `:177`; lo prueba
   `WhatsAppChannelAdapterTest.mexicanSenderWithTheOldMobilePrefixKeepsTheirE164PhoneWithoutTheOne`). Estos dos casos
   no están en los tests de `people`.
 - **WhatsApp BSUID**: cuando WhatsApp mande el id de usuario sin teléfono, esa persona va a quedar duplicada respecto
