@@ -152,7 +152,7 @@ Flujo entrante, como quedó en `InboundPipeline.accept` (#10, `InboundPipeline.j
 if (timeline.isRecorded(account.id(), inbound.externalId())) {                    // solo lectura
     return;                                                       // reenvío: sin persona, actividad ni evento
 }
-var personId = people.resolveOrCreate(inbound.sender());                          // tx 1
+var personId = people.resolveOrCreate(inbound.sender(), inbound.senderDisplayName());   // tx 1
 var opportunityId = opportunities.recordActivity(personId, account.channelType().name());   // tx 2
 var recorded = timeline.recordReceived(new ReceivedMessage(personId, opportunityId, account.id(),
         account.channelType(), inbound.externalId(), inbound.content(), inbound.occurredAt()));   // tx 3

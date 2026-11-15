@@ -16,12 +16,17 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Named;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
@@ -80,6 +85,111 @@ class PersonDirectoryTest {
     }
 
     @Test
+    void unknownIdentityResolvedWithANameCreatesAPersonWithThatName() {
+        // Given
+        var acme = fixture.organization("Acme");
+
+        // When
+        var personId = resolveIn(acme, ContactIdentity.phone("+54 9 11 5555-0101"), "Ana Pérez");
+
+        // Then
+        assertOnlyPerson(acme, personId, "Ana Pérez", IdentityKind.PHONE, "+5491155550101");
+    }
+
+    @Test
+    void unknownIdentityResolvedWithoutNameCreatesAnUnnamedPerson() {
+        // Given
+        var acme = fixture.organization("Acme");
+
+        // When
+        var personId = resolveIn(acme, ContactIdentity.phone("+54 9 11 5555-0101"), null);
+
+        // Then
+        assertOnlyPerson(acme, personId, null, IdentityKind.PHONE, "+5491155550101");
+    }
+
+    @Test
+    void knownPersonKeepsHerNameWhenResolvedWithAnotherName() {
+        // Given
+        var acme = fixture.organization("Acme");
+        var knownPerson = resolveIn(acme, ContactIdentity.phone("+54 9 11 5555-0101"), "Ana Pérez");
+
+        // When
+        var resolvedPerson = resolveIn(acme, ContactIdentity.phone("+5491155550101"), "Ana María Pérez");
+
+        // Then
+        assertThat(resolvedPerson).isEqualTo(knownPerson);
+        assertOnlyPerson(acme, knownPerson, "Ana Pérez", IdentityKind.PHONE, "+5491155550101");
+    }
+
+    @Test
+    void knownPersonKeepsHerNameWhenResolvedWithoutName() {
+        // Given
+        var acme = fixture.organization("Acme");
+        var knownPerson = resolveIn(acme, ContactIdentity.phone("+54 9 11 5555-0101"), "Ana Pérez");
+
+        // When
+        var resolvedPerson = resolveIn(acme, ContactIdentity.phone("+5491155550101"), null);
+
+        // Then
+        assertThat(resolvedPerson).isEqualTo(knownPerson);
+        assertOnlyPerson(acme, knownPerson, "Ana Pérez", IdentityKind.PHONE, "+5491155550101");
+    }
+
+    @Test
+    void knownUnnamedPersonStaysUnnamedWhenResolvedWithAName() {
+        // Given
+        var acme = fixture.organization("Acme");
+        var knownPerson = resolveIn(acme, ContactIdentity.phone("+54 9 11 5555-0101"));
+
+        // When
+        var resolvedPerson = resolveIn(acme, ContactIdentity.phone("+5491155550101"), "Ana Pérez");
+
+        // Then
+        assertThat(resolvedPerson).isEqualTo(knownPerson);
+        assertOnlyPerson(acme, knownPerson, null, IdentityKind.PHONE, "+5491155550101");
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("namesToClean")
+    void newPersonNameIsTrimmedAndCleanedOfLineBreaksAndControlCharacters(String rawName, String storedName) {
+        // Given
+        var acme = fixture.organization("Acme");
+
+        // When
+        var personId = resolveIn(acme, ContactIdentity.phone("+54 9 11 5555-0101"), rawName);
+
+        // Then
+        assertOnlyPerson(acme, personId, storedName, IdentityKind.PHONE, "+5491155550101");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "   ", "\n\t", "\u0000", "\u2028 \r\n", "\u00A0", "\u2007\u202F\u00A0"})
+    void blankNameLeavesTheNewPersonUnnamed(String blankName) {
+        // Given
+        var acme = fixture.organization("Acme");
+
+        // When
+        var personId = resolveIn(acme, ContactIdentity.phone("+54 9 11 5555-0101"), blankName);
+
+        // Then
+        assertOnlyPerson(acme, personId, null, IdentityKind.PHONE, "+5491155550101");
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("overlongNames")
+    void overlongNameIsCutAtTwoHundredCharactersWithoutSplittingAnEmoji(String overlongName, String storedName) {
+        // Given
+        var acme = fixture.organization("Acme");
+
+        // When
+        var personId = resolveIn(acme, ContactIdentity.phone("+54 9 11 5555-0101"), overlongName);
+
+        // Then
+        assertOnlyPerson(acme, personId, storedName, IdentityKind.PHONE, "+5491155550101");
+    }
+
+    @Test
     void knownIdentityWrittenDifferentlyResolvesToTheSamePerson() {
         // Given
         var acme = fixture.organization("Acme");
@@ -119,8 +229,8 @@ class PersonDirectoryTest {
         // Then
         assertThat(messengerPerson).isNotEqualTo(telegramPerson);
         assertThat(fixture.peopleOf(acme)).containsExactlyInAnyOrder(
-                new StoredPerson(telegramPerson, NOW),
-                new StoredPerson(messengerPerson, NOW));
+                new StoredPerson(telegramPerson, NOW, null),
+                new StoredPerson(messengerPerson, NOW, null));
         assertThat(fixture.identitiesOf(acme)).containsExactlyInAnyOrder(
                 new StoredIdentity(telegramPerson, IdentityKind.TELEGRAM_USER, "12345"),
                 new StoredIdentity(messengerPerson, IdentityKind.MESSENGER_USER, "12345"));
@@ -131,17 +241,17 @@ class PersonDirectoryTest {
         // Given
         var acme = fixture.organization("Acme");
         var globex = fixture.organization("Globex");
-        var acmePerson = resolveIn(acme, ContactIdentity.phone("+54 9 11 5555-0101"));
+        var acmePerson = resolveIn(acme, ContactIdentity.phone("+54 9 11 5555-0101"), "Ana Pérez");
 
         // When
-        var globexPerson = resolveIn(globex, ContactIdentity.phone("+5491155550101"));
+        var globexPerson = resolveIn(globex, ContactIdentity.phone("+5491155550101"), "Anita");
         var acmePersonAgain = resolveIn(acme, ContactIdentity.phone("+5491155550101"));
 
         // Then
         assertThat(globexPerson).isNotEqualTo(acmePerson);
         assertThat(acmePersonAgain).isEqualTo(acmePerson);
-        assertOnlyPerson(acme, acmePerson, IdentityKind.PHONE, "+5491155550101");
-        assertOnlyPerson(globex, globexPerson, IdentityKind.PHONE, "+5491155550101");
+        assertOnlyPerson(acme, acmePerson, "Ana Pérez", IdentityKind.PHONE, "+5491155550101");
+        assertOnlyPerson(globex, globexPerson, "Anita", IdentityKind.PHONE, "+5491155550101");
     }
 
     @Test
@@ -152,7 +262,7 @@ class PersonDirectoryTest {
 
         // When
         var resolution = CompletableFuture.supplyAsync(
-                () -> resolveIn(acme, ContactIdentity.phone("+54 9 11 5555-0101")), background);
+                () -> resolveIn(acme, ContactIdentity.phone("+54 9 11 5555-0101"), "Ana Pérez"), background);
         await().atMost(TIMEOUT)
                 .failFast(() -> assertThat(resolution).as("resolution waiting for the rival").isNotDone())
                 .until(fixture::anotherSessionIsWaitingToWriteIdentities);
@@ -164,7 +274,8 @@ class PersonDirectoryTest {
         assertOnlyPerson(acme, rival.personId(), IdentityKind.PHONE, "+5491155550101");
         assertThat(output.getAll())
                 .contains("person_identities_organization_id_kind_value_key")
-                .doesNotContain("5491155550101");
+                .doesNotContain("5491155550101")
+                .doesNotContain("Ana Pérez");
     }
 
     @Test
@@ -216,12 +327,43 @@ class PersonDirectoryTest {
         assertThat(fixture.identitiesOf(acme)).isEmpty();
     }
 
+    static Stream<Arguments> namesToClean() {
+        return Stream.of(
+                Arguments.of(Named.of("surrounding spaces", "  Ana Pérez  "), "Ana Pérez"),
+                Arguments.of(Named.of("line break", "Ana\nPérez"), "Ana Pérez"),
+                Arguments.of(Named.of("Windows line break", "Ana\r\nPérez"), "Ana Pérez"),
+                Arguments.of(Named.of("Unicode line separator", "Ana\u2028Pérez"), "Ana Pérez"),
+                Arguments.of(Named.of("tab and trailing line break", "Ana\tPérez\n"), "Ana Pérez"),
+                Arguments.of(Named.of("NUL character", "Ana\u0000Pérez"), "Ana Pérez"),
+                Arguments.of(Named.of("lone surrogate", "Ana\uD83DPérez"), "Ana Pérez"),
+                Arguments.of(Named.of("no-break space", "Ana\u00A0Pérez"), "Ana Pérez"),
+                Arguments.of(Named.of("run of spaces", "Ana   Pérez"), "Ana Pérez"),
+                Arguments.of(Named.of("already clean", "Ana Pérez"), "Ana Pérez"),
+                Arguments.of(Named.of("emoji joined with zero-width joiners", "Ana 👩\u200D👩\u200D👧 Pérez"),
+                        "Ana 👩\u200D👩\u200D👧 Pérez"));
+    }
+
+    static Stream<Arguments> overlongNames() {
+        return Stream.of(
+                Arguments.of(Named.of("emoji at the limit", "a".repeat(199) + "😀bbb"), "a".repeat(199) + "😀"),
+                Arguments.of(Named.of("plain letters", "a".repeat(300)), "a".repeat(200)));
+    }
+
     private UUID resolveIn(UUID organizationId, ContactIdentity identity) {
         return currentOrganization.callAs(organizationId, () -> directory.resolveOrCreate(identity));
     }
 
+    private UUID resolveIn(UUID organizationId, ContactIdentity identity, String displayName) {
+        return currentOrganization.callAs(organizationId, () -> directory.resolveOrCreate(identity, displayName));
+    }
+
     private void assertOnlyPerson(UUID organizationId, UUID personId, IdentityKind kind, String value) {
-        assertThat(fixture.peopleOf(organizationId)).containsExactly(new StoredPerson(personId, NOW));
+        assertOnlyPerson(organizationId, personId, null, kind, value);
+    }
+
+    private void assertOnlyPerson(UUID organizationId, UUID personId, String displayName, IdentityKind kind,
+            String value) {
+        assertThat(fixture.peopleOf(organizationId)).containsExactly(new StoredPerson(personId, NOW, displayName));
         assertThat(fixture.identitiesOf(organizationId)).containsExactly(new StoredIdentity(personId, kind, value));
     }
 }

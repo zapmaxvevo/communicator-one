@@ -24,16 +24,20 @@ public class PersonDirectory {
     }
 
     public UUID resolveOrCreate(ContactIdentity identity) {
+        return resolveOrCreate(identity, null);
+    }
+
+    public UUID resolveOrCreate(ContactIdentity identity, String displayName) {
         Objects.requireNonNull(identity, "identity");
         Assert.state(!TransactionSynchronizationManager.isSynchronizationActive(),
                 "A person is resolved in its own transaction, not inside an open one");
-        return findIdOf(identity).orElseGet(() -> create(identity));
+        return findIdOf(identity).orElseGet(() -> create(identity, displayName));
     }
 
-    private UUID create(ContactIdentity identity) {
+    private UUID create(ContactIdentity identity, String displayName) {
         try {
             return writing.execute(transaction -> findIdOf(identity)
-                    .orElseGet(() -> people.saveAndFlush(Person.identifiedBy(identity, clock)).id()));
+                    .orElseGet(() -> people.saveAndFlush(Person.identifiedBy(identity, displayName, clock)).id()));
         } catch (DataIntegrityViolationException concurrentCreation) {
             return findIdOf(identity).orElseThrow(() -> concurrentCreation);
         }

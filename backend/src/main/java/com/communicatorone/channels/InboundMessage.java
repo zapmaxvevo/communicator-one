@@ -6,7 +6,7 @@ import java.time.Instant;
 import org.springframework.util.Assert;
 
 record InboundMessage(String externalAccountId, ContactIdentity sender, String externalId, MessageContent content,
-        Instant occurredAt) {
+        Instant occurredAt, String senderDisplayName) {
 
     InboundMessage {
         Assert.hasText(externalAccountId, "An inbound message needs the account it was sent to");
@@ -18,5 +18,10 @@ record InboundMessage(String externalAccountId, ContactIdentity sender, String e
         Assert.doesNotContain(sender.value(), "\0", "An inbound message cannot contain NUL in its sender");
         Assert.doesNotContain(externalId, "\0", "An inbound message cannot contain NUL in its id");
         Assert.doesNotContain(content.text(), "\0", "An inbound message cannot contain NUL in its text");
+    }
+
+    @Override
+    public String toString() {
+        return "InboundMessage[" + externalAccountId + ", " + sender + "]";
     }
 }

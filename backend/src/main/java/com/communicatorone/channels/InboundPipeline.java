@@ -70,7 +70,7 @@ class InboundPipeline {
         if (timeline.isRecorded(account.id(), inbound.externalId())) {
             return;
         }
-        var personId = people.resolveOrCreate(inbound.sender());
+        var personId = people.resolveOrCreate(inbound.sender(), inbound.senderDisplayName());
         var opportunityId = opportunities.recordActivity(personId, account.channelType().name());
         var recorded = timeline.recordReceived(new ReceivedMessage(personId, opportunityId, account.id(),
                 account.channelType(), inbound.externalId(), inbound.content(), inbound.occurredAt()));

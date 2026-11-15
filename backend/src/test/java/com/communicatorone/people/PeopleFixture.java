@@ -37,9 +37,9 @@ class PeopleFixture {
     }
 
     List<StoredPerson> peopleOf(UUID organizationId) {
-        return jdbcTemplate.query("SELECT id, created_at FROM people WHERE organization_id = ?",
+        return jdbcTemplate.query("SELECT id, created_at, display_name FROM people WHERE organization_id = ?",
                 (row, number) -> new StoredPerson(row.getObject("id", UUID.class),
-                        row.getObject("created_at", OffsetDateTime.class).toInstant()),
+                        row.getObject("created_at", OffsetDateTime.class).toInstant(), row.getString("display_name")),
                 organizationId);
     }
 
@@ -101,7 +101,7 @@ class PeopleFixture {
         }
     }
 
-    record StoredPerson(UUID id, Instant createdAt) {
+    record StoredPerson(UUID id, Instant createdAt, String displayName) {
     }
 
     record StoredIdentity(UUID personId, IdentityKind kind, String value) {
