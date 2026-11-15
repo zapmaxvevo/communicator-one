@@ -71,10 +71,17 @@ class InboundPipelineFixture {
         return webhook(externalAccountId, List.of(), List.of(statuses));
     }
 
-    WebhookPayload whatsAppTextTo(String phoneNumberId) {
-        var example = WhatsAppExamples.payload("text-message.json").body();
-        assertThat(example).contains(WhatsAppExamples.PHONE_NUMBER_ID);
-        return new WebhookPayload(example.replace(WhatsAppExamples.PHONE_NUMBER_ID, phoneNumberId));
+    WebhookPayload whatsAppExampleTo(String example, String phoneNumberId) {
+        var body = WhatsAppExamples.payload(example).body();
+        assertThat(body).contains(WhatsAppExamples.PHONE_NUMBER_ID);
+        return new WebhookPayload(body.replace(WhatsAppExamples.PHONE_NUMBER_ID, phoneNumberId));
+    }
+
+    WebhookPayload whatsAppTextWithProfileNameTo(String phoneNumberId, String profileName) {
+        var body = whatsAppExampleTo("text-message.json", phoneNumberId).body();
+        var exampleName = "\"name\": \"Ana Pérez\"";
+        assertThat(body).contains(exampleName);
+        return new WebhookPayload(body.replace(exampleName, "\"name\": \"%s\"".formatted(profileName)));
     }
 
     Conversation conversationWith(UUID organizationId, String phone) {
@@ -94,6 +101,12 @@ class InboundPipelineFixture {
                 .filter(message -> message.id().equals(recorded.id()))
                 .findFirst()
                 .orElseThrow();
+    }
+
+    List<StoredPerson> peopleOf(UUID organizationId) {
+        return jdbcTemplate.query("SELECT id, display_name FROM people WHERE organization_id = ?",
+                (row, number) -> new StoredPerson(row.getObject("id", UUID.class), row.getString("display_name")),
+                organizationId);
     }
 
     List<StoredIdentity> identitiesOf(UUID organizationId) {
@@ -225,6 +238,9 @@ class InboundPipelineFixture {
     }
 
     record Conversation(UUID personId, UUID opportunityId) {
+    }
+
+    record StoredPerson(UUID id, String displayName) {
     }
 
     record StoredIdentity(UUID personId, IdentityKind kind, String value) {

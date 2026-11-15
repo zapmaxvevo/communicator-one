@@ -92,7 +92,8 @@ class SandboxChannelAdapter implements ChannelAdapter {
         }
 
         InboundMessage inboundTo(String account) {
-            return new InboundMessage(account, from.identity(), id, new MessageContent(text), Instant.parse(sentAt));
+            return new InboundMessage(account, from.identity(), id, new MessageContent(text), Instant.parse(sentAt),
+                    null);
         }
 
         @Override

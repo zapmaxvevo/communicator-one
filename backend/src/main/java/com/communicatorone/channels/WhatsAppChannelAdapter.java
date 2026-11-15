@@ -123,19 +123,22 @@ class WhatsAppChannelAdapter implements ChannelAdapter {
         }
     }
 
-    record WhatsAppValue(WhatsAppMetadata metadata, List<WhatsAppMessage> messages, List<WhatsAppStatus> statuses) {
+    record WhatsAppValue(WhatsAppMetadata metadata, List<WhatsAppContact> contacts, List<WhatsAppMessage> messages,
+            List<WhatsAppStatus> statuses) {
 
         WhatsAppValue {
             Assert.notNull(metadata, "A WhatsApp messages change needs its metadata");
+            contacts = Objects.requireNonNullElse(contacts, List.of());
             messages = Objects.requireNonNullElse(messages, List.of());
             statuses = Objects.requireNonNullElse(statuses, List.of());
+            Assert.noNullElements(contacts, "A WhatsApp messages change has no null contacts");
             Assert.noNullElements(messages, "A WhatsApp messages change has no null messages");
             Assert.noNullElements(statuses, "A WhatsApp messages change has no null statuses");
         }
 
         List<InboundMessage> inboundMessages() {
             return messages.stream()
-                    .map(message -> message.inboundTo(metadata.phoneNumberId()))
+                    .map(message -> message.inboundTo(metadata.phoneNumberId(), contacts))
                     .flatMap(Optional::stream)
                     .toList();
         }
@@ -155,19 +158,49 @@ class WhatsAppChannelAdapter implements ChannelAdapter {
         }
     }
 
+    record WhatsAppContact(@JsonProperty("wa_id") String waId, WhatsAppProfile profile) {
+
+        Optional<String> profileNameOf(String sender) {
+            if (!sender.equals(waId) || profile == null) {
+                return Optional.empty();
+            }
+            return Optional.ofNullable(profile.name());
+        }
+
+        @Override
+        public String toString() {
+            return "WhatsAppContact[profile]";
+        }
+    }
+
+    record WhatsAppProfile(String name) {
+
+        @Override
+        public String toString() {
+            return "WhatsAppProfile[name]";
+        }
+    }
+
     record WhatsAppMessage(String from, String id, String timestamp, String type, WhatsAppText text) {
 
-        Optional<InboundMessage> inboundTo(String account) {
+        Optional<InboundMessage> inboundTo(String account, List<WhatsAppContact> contacts) {
             if (!TEXT_TYPE.equals(type)) {
                 return Optional.empty();
             }
-            return sender().map(sender -> textFrom(sender, account));
+            return sender().map(sender -> textFrom(sender, account, profileNameIn(contacts)));
         }
 
-        private InboundMessage textFrom(ContactIdentity sender, String account) {
+        private InboundMessage textFrom(ContactIdentity sender, String account, String senderDisplayName) {
             Assert.notNull(text, "A WhatsApp text message needs its text");
             return new InboundMessage(account, sender, id, new MessageContent(text.body()),
-                    Instant.ofEpochSecond(Long.parseLong(timestamp)));
+                    Instant.ofEpochSecond(Long.parseLong(timestamp)), senderDisplayName);
+        }
+
+        private String profileNameIn(List<WhatsAppContact> contacts) {
+            return contacts.stream()
+                    .flatMap(contact -> contact.profileNameOf(from).stream())
+                    .findFirst()
+                    .orElse(null);
         }
 
         private Optional<ContactIdentity> sender() {

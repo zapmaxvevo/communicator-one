@@ -13,6 +13,7 @@ import com.communicatorone.channels.InboundPipelineFixture.StatusReport;
 import com.communicatorone.channels.InboundPipelineFixture.StoredIdentity;
 import com.communicatorone.channels.InboundPipelineFixture.StoredMessage;
 import com.communicatorone.channels.InboundPipelineFixture.StoredOpportunity;
+import com.communicatorone.channels.InboundPipelineFixture.StoredPerson;
 import com.communicatorone.messaging.ChannelType;
 import com.communicatorone.messaging.MessageStatus;
 import com.communicatorone.messaging.Timeline;
@@ -98,6 +99,7 @@ class InboundPipelineTest {
         var opportunity = assertThat(fixture.opportunitiesOf(acme)).singleElement().actual();
         var message = assertThat(fixture.messagesOf(acme)).singleElement().actual();
         var person = opportunity.personId();
+        assertThat(fixture.peopleOf(acme)).containsExactly(new StoredPerson(person, null));
         assertThat(fixture.identitiesOf(acme)).containsExactly(new StoredIdentity(person, IdentityKind.PHONE, ANA));
         assertThat(opportunity).isEqualTo(StoredOpportunity.open(opportunity.id(), person, NOW, NOW));
         assertThat(message).isEqualTo(StoredMessage.received(message.id(), person, opportunity.id(), account.id(),
@@ -106,12 +108,12 @@ class InboundPipelineTest {
     }
 
     @Test
-    void whatsAppTextMessageIsRecordedOnTheTimelineOfItsAccount() {
+    void whatsAppTextFromUnknownPhoneCreatesPersonNamedAfterHerProfileAndRecordsTheMessage() {
         // Given
         var acme = channelAccounts.organization("Acme");
         var phoneNumberId = channelAccounts.externalAccountId("whatsapp");
         var account = channelAccounts.account(acme, ChannelType.WHATSAPP, phoneNumberId, true);
-        var payload = fixture.whatsAppTextTo(phoneNumberId);
+        var payload = fixture.whatsAppExampleTo("text-message.json", phoneNumberId);
 
         // When
         pipeline.receive(ChannelType.WHATSAPP, payload);
@@ -120,11 +122,97 @@ class InboundPipelineTest {
         var opportunity = assertThat(fixture.opportunitiesOf(acme)).singleElement().actual();
         var message = assertThat(fixture.messagesOf(acme)).singleElement().actual();
         var person = opportunity.personId();
+        assertThat(fixture.peopleOf(acme)).containsExactly(new StoredPerson(person, "Ana Pérez"));
         assertThat(fixture.identitiesOf(acme)).containsExactly(new StoredIdentity(person, IdentityKind.PHONE, ANA));
         assertThat(opportunity).isEqualTo(
                 StoredOpportunity.open(opportunity.id(), person, ChannelType.WHATSAPP, NOW, NOW));
         assertThat(message).isEqualTo(StoredMessage.received(message.id(), person, opportunity.id(), account.id(),
                 ChannelType.WHATSAPP, WhatsAppExamples.TEXT_MESSAGE_ID, "Hola, ¿tienen financiación?", SENT_AT, NOW));
+        assertThat(receivedMessages.in(acme)).containsExactly(message.event(acme));
+    }
+
+    @Test
+    void knownPersonWhoChangedHerWhatsAppProfileNameKeepsTheNameSheArrivedWith() {
+        // Given
+        var acme = channelAccounts.organization("Acme");
+        var phoneNumberId = channelAccounts.externalAccountId("whatsapp");
+        var account = channelAccounts.account(acme, ChannelType.WHATSAPP, phoneNumberId, true);
+        pipeline.receive(ChannelType.WHATSAPP, fixture.whatsAppExampleTo("text-message.json", phoneNumberId));
+        var wroteAgainAt = NOW.plus(Duration.ofHours(2));
+        clock.setTo(wroteAgainAt);
+
+        // When
+        pipeline.receive(ChannelType.WHATSAPP,
+                fixture.whatsAppExampleTo("text-message-renamed-profile.json", phoneNumberId));
+
+        // Then
+        var opportunity = assertThat(fixture.opportunitiesOf(acme)).singleElement().actual();
+        var person = opportunity.personId();
+        var messages = fixture.messagesOf(acme);
+        assertThat(fixture.peopleOf(acme)).containsExactly(new StoredPerson(person, "Ana Pérez"));
+        assertThat(fixture.identitiesOf(acme)).containsExactly(new StoredIdentity(person, IdentityKind.PHONE, ANA));
+        assertThat(opportunity).isEqualTo(
+                StoredOpportunity.open(opportunity.id(), person, ChannelType.WHATSAPP, NOW, wroteAgainAt));
+        assertThat(messages).hasSize(2);
+        assertThat(messages).containsExactly(
+                StoredMessage.received(messages.get(0).id(), person, opportunity.id(), account.id(),
+                        ChannelType.WHATSAPP, WhatsAppExamples.TEXT_MESSAGE_ID, "Hola, ¿tienen financiación?",
+                        SENT_AT, NOW),
+                StoredMessage.received(messages.get(1).id(), person, opportunity.id(), account.id(),
+                        ChannelType.WHATSAPP, WhatsAppExamples.RENAMED_PROFILE_MESSAGE_ID,
+                        "Hola, ¿tienen financiación?", SENT_AT.plus(Duration.ofHours(2)), wroteAgainAt));
+        assertThat(receivedMessages.in(acme)).containsExactly(messages.get(0).event(acme),
+                messages.get(1).event(acme));
+    }
+
+    @Test
+    void whatsAppRedeliveryWithAnotherProfileNameChangesNothing() {
+        // Given
+        var acme = channelAccounts.organization("Acme");
+        var phoneNumberId = channelAccounts.externalAccountId("whatsapp");
+        var account = channelAccounts.account(acme, ChannelType.WHATSAPP, phoneNumberId, true);
+        pipeline.receive(ChannelType.WHATSAPP, fixture.whatsAppExampleTo("text-message.json", phoneNumberId));
+        clock.advance(Duration.ofMinutes(5));
+
+        // When
+        pipeline.receive(ChannelType.WHATSAPP,
+                fixture.whatsAppTextWithProfileNameTo(phoneNumberId, "Ana María Pérez"));
+
+        // Then
+        var opportunity = assertThat(fixture.opportunitiesOf(acme)).singleElement().actual();
+        var message = assertThat(fixture.messagesOf(acme)).singleElement().actual();
+        var person = opportunity.personId();
+        assertThat(fixture.peopleOf(acme)).containsExactly(new StoredPerson(person, "Ana Pérez"));
+        assertThat(fixture.identitiesOf(acme)).containsExactly(new StoredIdentity(person, IdentityKind.PHONE, ANA));
+        assertThat(opportunity).isEqualTo(
+                StoredOpportunity.open(opportunity.id(), person, ChannelType.WHATSAPP, NOW, NOW));
+        assertThat(message).isEqualTo(StoredMessage.received(message.id(), person, opportunity.id(), account.id(),
+                ChannelType.WHATSAPP, WhatsAppExamples.TEXT_MESSAGE_ID, "Hola, ¿tienen financiación?", SENT_AT, NOW));
+        assertThat(receivedMessages.in(acme)).containsExactly(message.event(acme));
+    }
+
+    @Test
+    void personFirstKnownByHerPhoneWithoutNameStaysUnnamedWhenHerWhatsAppProfileArrives() {
+        // Given
+        var acme = channelAccounts.organization("Acme");
+        var phoneNumberId = channelAccounts.externalAccountId("whatsapp");
+        var account = channelAccounts.account(acme, ChannelType.WHATSAPP, phoneNumberId, true);
+        var conversation = fixture.conversationWith(acme, ANA);
+        var payload = fixture.whatsAppExampleTo("text-message.json", phoneNumberId);
+
+        // When
+        pipeline.receive(ChannelType.WHATSAPP, payload);
+
+        // Then
+        var person = conversation.personId();
+        var message = assertThat(fixture.messagesOf(acme)).singleElement().actual();
+        assertThat(fixture.peopleOf(acme)).containsExactly(new StoredPerson(person, null));
+        assertThat(fixture.identitiesOf(acme)).containsExactly(new StoredIdentity(person, IdentityKind.PHONE, ANA));
+        assertThat(fixture.opportunitiesOf(acme)).containsExactly(
+                StoredOpportunity.open(conversation.opportunityId(), person, NOW, NOW));
+        assertThat(message).isEqualTo(StoredMessage.received(message.id(), person, conversation.opportunityId(),
+                account.id(), ChannelType.WHATSAPP, WhatsAppExamples.TEXT_MESSAGE_ID, "Hola, ¿tienen financiación?",
+                SENT_AT, NOW));
         assertThat(receivedMessages.in(acme)).containsExactly(message.event(acme));
     }
 

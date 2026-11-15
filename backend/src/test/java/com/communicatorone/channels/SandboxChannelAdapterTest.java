@@ -56,10 +56,11 @@ class SandboxChannelAdapterTest {
         // Then
         assertThat(inbound).containsExactly(
                 new InboundMessage("sandbox-acme", ContactIdentity.phone("+5491155550101"), "in-1",
-                        new MessageContent("Hola, ¿tienen financiación?"), Instant.parse("2026-03-02T08:59:20Z")),
+                        new MessageContent("Hola, ¿tienen financiación?"), Instant.parse("2026-03-02T08:59:20Z"),
+                        null),
                 new InboundMessage("sandbox-acme", new ContactIdentity(IdentityKind.TELEGRAM_USER, "juan_perez"),
                         "in-2", new MessageContent("¿Hacen envíos al interior?"),
-                        Instant.parse("2026-03-02T09:01:05Z")));
+                        Instant.parse("2026-03-02T09:01:05Z"), null));
     }
 
     @Test
@@ -123,7 +124,7 @@ class SandboxChannelAdapterTest {
         assertThat(statuses).isEmpty();
         assertThat(inbound).containsExactly(new InboundMessage("sandbox-acme",
                 ContactIdentity.phone("+5491155550101"), "in-1", new MessageContent("Hola"),
-                Instant.parse("2026-03-02T08:59:20Z")));
+                Instant.parse("2026-03-02T08:59:20Z"), null));
     }
 
     @ParameterizedTest(name = "{0} ({2})")
@@ -201,6 +202,9 @@ class SandboxChannelAdapterTest {
                          "text": "Hola", "sentAt": "2026-03-02T08:59:20Z"}""")),
                 new MalformedPayload("message without sender", withMessage("""
                         {"id": "in-1", "text": "Hola", "sentAt": "2026-03-02T08:59:20Z"}""")),
+                new MalformedPayload("sender with a name", withMessage("""
+                        {"id": "in-1", "from": {"kind": "PHONE", "value": "+5491155550101", "name": "Ana Pérez"},
+                         "text": "Hola", "sentAt": "2026-03-02T08:59:20Z"}""")),
                 new MalformedPayload("sender without value", withMessage("""
                         {"id": "in-1", "from": {"kind": "PHONE"},
                          "text": "Hola", "sentAt": "2026-03-02T08:59:20Z"}""")),
